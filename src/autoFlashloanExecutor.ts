@@ -1,54 +1,57 @@
 // autoFlashloanExecutor.ts
-import { Connection, Keypair, Transaction, PublicKey } from '@solana/web3.js';
+import { Connection, Keypair, PublicKey, Transaction } from '@solana/web3.js';
 import { SolendMarket } from '@solendprotocol/solend-sdk';
 import BN from 'bn.js';
 import { ArbitrageSignal, TradeLog, ExecutorType } from './types';
 import { pnlLogger } from './pnlLogger';
 import { config } from './config';
-import { buildExecuteSaleTransaction } from './marketplaceExecutor';
+import { buildExecuteSaleTransaction } from './marketplaceInstructions';
+import bs58 from 'bs58';
 
 const connection = new Connection(config.rpcUrl, 'confirmed');
-const payer = Keypair.fromSecretKey(Buffer.from(config.walletPrivateKey, 'base58'));
+const payer = Keypair.fromSecretKey(bs58.decode(config.walletPrivateKey));
 
 /**
- * Execute a single arbitrage signal using Solend flash loan
- * Combines flash loan + NFT sale into a single atomic transaction
+ * Executes a single arbitrage signal using a Solend flash loan
  */
 export async function executeFlashloanTrade(signal: ArbitrageSignal): Promise<TradeLog | null> {
   try {
-    // 1️⃣ Initialize Solend market
+    // Initialize Solend market
     const market = await SolendMarket.initialize({
       connection,
-      cluster: config.cluster || 'mainnet-beta',
+      cluster: 'mainnet-beta', // or 'devnet' for testing
     });
 
-    // 2️⃣ Determine borrow amount (BN -> safe number in SOL)
-    const borrowAmountSOL = Number(signal.targetListing.price.div(new BN(1e9)).toString());
+    const borrowAmountSOL = signal.targetListing.price.toNumber() / 1e9; // Convert lamports -> SOL
 
-    // 3️⃣ Execute flash loan
-    const txSig = await market.flashLoan({
+    let txSig: string | undefined = undefined;
+
+    await market.flashLoan({
       amount: borrowAmountSOL,
-      reserve: new PublicKey('So11111111111111111111111111111111111111112'), // WSOL
-      receiver: payer.publicKey,
+      reserve: 'So11111111111111111111111111111111111111112', // WSOL
+      receiver: payer.publicKey, // must be PublicKey
       callback: async (_conn, _keypair) => {
-        // 4️⃣ Build NFT marketplace sale transaction
-        const saleTx: Transaction = await buildExecuteSaleTransaction({
+        // Build marketplace transaction
+        const tx: Transaction = await buildExecuteSaleTransaction({
           connection,
           payerKeypair: payer,
           listing: signal.targetListing,
-          bid: signal.targetBid,
+          bid: signal.targetBid
         });
 
-        // 5️⃣ Add sale transaction to flash loan atomic execution
-        // Return the transaction for Solend to include and execute atomically
-        return saleTx;
-      },
+        // Send transaction and capture signature
+        txSig = await connection.sendTransaction(tx, [payer], {
+          skipPreflight: false,
+          preflightCommitment: 'confirmed'
+        });
+
+        // Log executed trade
+        pnlLogger.logPnL(signal, txSig, 'executed');
+
+        return txSig;
+      }
     });
 
-    // 6️⃣ Log trade via pnlLogger
-    pnlLogger.logPnL(signal, txSig, 'executed');
-
-    // 7️⃣ Return trade details
     return {
       timestamp: Date.now(),
       mint: signal.targetListing.mint,
@@ -58,7 +61,7 @@ export async function executeFlashloanTrade(signal: ArbitrageSignal): Promise<Tr
       currency: signal.targetListing.currency,
       txSig,
       type: 'executed',
-      executorType: 'flash_loan',
+      executorType: 'flash_loan'
     };
 
   } catch (err: any) {
@@ -69,13 +72,18 @@ export async function executeFlashloanTrade(signal: ArbitrageSignal): Promise<Tr
 }
 
 /**
- * Execute multiple signals in **sequence** to avoid overlapping flash loans
+ * Execute multiple signals in parallel (batch)
  */
 export async function executeBatch(signals: ArbitrageSignal[]): Promise<(TradeLog | null)[]> {
   const results: (TradeLog | null)[] = [];
   for (const signal of signals) {
-    const trade = await executeFlashloanTrade(signal);
-    results.push(trade);
+    try {
+      const trade = await executeFlashloanTrade(signal);
+      results.push(trade);
+    } catch (err: any) {
+      pnlLogger.logError(err, { signal, message: 'Batch trade failed' });
+      results.push(null);
+    }
   }
   return results;
 }
