@@ -1,47 +1,68 @@
-import { Connection, Keypair, Transaction, PublicKey, SystemProgram } from '@solana/web3.js';
-import { pnlLogger } from './pnlLogger';
-import { ArbitrageSignal, TradeLog } from './types';
-import { executeSale } from './marketplaceInstructions';
-import { config } from './config';
-import { SolendAction, SolendMarket, SolendReserve } from '@solendprotocol/solend-sdk';
+// autoFlashloanExecutor.ts
+import { Connection, Keypair, Transaction, PublicKey } from '@solana/web3.js';
 import BN from 'bn.js';
 import bs58 from 'bs58';
+import { config } from './config';
+import { ArbitrageSignal, TradeLog } from './types';
+import { executeSale } from './marketplaceInstructions';
+import { pnlLogger } from './pnlLogger';
+import { SolendMarket, SolendReserve, SolendAction } from '@solendprotocol/solend-sdk';
 
+// Connection & wallet
 const connection = new Connection(config.rpcUrl, 'confirmed');
 const payer = Keypair.fromSecretKey(bs58.decode(config.walletPrivateKey));
 
+/**
+ * Execute a single flashloan arbitrage trade
+ */
 export async function executeFlashloanTrade(signal: ArbitrageSignal): Promise<TradeLog | null> {
   try {
-    // 1️⃣ Init Solend market
     const market = await SolendMarket.initialize({ connection, cluster: 'mainnet-beta' });
 
-    // 2️⃣ Borrow amount in lamports / SOL
-    const borrowAmountSOL = signal.targetListing.price.toNumber() / 1e9;
-
-    // 3️⃣ Build flashloan instructions (WSOL reserve)
-    const wsolReserve = market.reserves.find((r: SolendReserve) => r.config.mint === 'So11111111111111111111111111111111111111112');
+    // Find WSOL reserve for flash loan
+    const wsolReserve: SolendReserve | undefined = market.reserves.find(
+      (r) => r.config.mint === 'So11111111111111111111111111111111111111112'
+    );
     if (!wsolReserve) throw new Error('WSOL reserve not found');
 
-    const flashLoanTx = new Transaction();
+    // Amount to borrow in lamports
+    const borrowAmountLamports = signal.targetListing.price.toNumber();
 
+    // Build flash loan instruction
+    const flashLoanTx = new Transaction();
     const flashLoanIx = SolendAction.createFlashLoanIx({
       sourceReserve: wsolReserve,
-      amount: borrowAmountSOL,
+      amount: borrowAmountLamports,
       receiver: payer.publicKey,
       programId: market.programId,
     });
-
     flashLoanTx.add(flashLoanIx);
 
-    // 4️⃣ Execute NFT sale inside callback
-    const saleResponse = await executeSale({
+    // Only simulate if configured
+    if (config.simulateOnly) {
+      const simResult = await connection.simulateTransaction(flashLoanTx);
+      if (simResult.value.err) {
+        pnlLogger.logMetrics({ message: '⚠️ Flashloan simulation failed', error: simResult.value.err });
+        return null;
+      } else {
+        pnlLogger.logMetrics({ message: '✅ Flashloan simulation succeeded (simulate-only mode)' });
+        return null;
+      }
+    }
+
+    // Execute NFT sale inside the flash loan transaction
+    const saleTx = await executeSale({
       connection,
       payerKeypair: payer,
       listing: signal.targetListing,
       bid: signal.targetBid,
     });
 
-    const txSig = saleResponse.response.signature || '';
+    // Combine flash loan + NFT sale into one atomic transaction
+    const combinedTx = new Transaction().add(...flashLoanTx.instructions, ...saleTx.instructions);
+
+    // Send transaction
+    const txSig = await connection.sendTransaction(combinedTx, [payer], { preflightCommitment: 'confirmed' });
 
     pnlLogger.logPnL(signal, txSig, 'executed');
 
@@ -63,11 +84,44 @@ export async function executeFlashloanTrade(signal: ArbitrageSignal): Promise<Tr
   }
 }
 
+/**
+ * Execute multiple flashloan arbitrage trades sequentially
+ */
 export async function executeBatch(signals: ArbitrageSignal[]): Promise<(TradeLog | null)[]> {
   const results: (TradeLog | null)[] = [];
   for (const signal of signals) {
-    const trade = await executeFlashloanTrade(signal);
-    results.push(trade);
+    try {
+      const trade = await executeFlashloanTrade(signal);
+      results.push(trade);
+    } catch (err: any) {
+      pnlLogger.logError(err, { signal, message: 'Batch trade failed' });
+      results.push(null);
+    }
   }
+  return results;
+}
+
+/**
+ * Execute multiple trades in parallel (optional)
+ */
+export async function executeBatchParallel(signals: ArbitrageSignal[], concurrency = 2): Promise<(TradeLog | null)[]> {
+  const results: (TradeLog | null)[] = [];
+  const queue = [...signals];
+
+  const workers = Array(concurrency).fill(null).map(async () => {
+    while (queue.length > 0) {
+      const signal = queue.shift();
+      if (!signal) continue;
+      try {
+        const trade = await executeFlashloanTrade(signal);
+        results.push(trade);
+      } catch (err: any) {
+        pnlLogger.logError(err, { signal, message: 'Parallel batch trade failed' });
+        results.push(null);
+      }
+    }
+  });
+
+  await Promise.all(workers);
   return results;
 }
