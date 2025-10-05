@@ -1,12 +1,12 @@
 import { Connection, Keypair } from "@solana/web3.js";
 import { scanForArbitrage } from "./scanForArbitrage";
-import { executeBatch } from "./autoFlashloanExecutor";  // Your batch function
+import { executeBatch } from "./autoFlashloanExecutor";
 import { pnlLogger } from "./pnlLogger";
 import { config } from "./config";
 import { ArbitrageSignal } from "./types";
 import axios from 'axios';
 import BN from 'bn.js';
-import bs58 from 'bs58';  // For key decode
+import bs58 from 'bs58';
 
 // Connection & payer from config
 const connection = new Connection(config.rpcUrl, "confirmed");
@@ -29,23 +29,22 @@ const botStats: BotStats = {
   lastScan: 0,
 };
 
-// Stub for loadActiveOpportunities (single collection for now—expand to array)
+// Stub for loadActiveOpportunities (single collection—expand to array for multi)
 async function loadActiveOpportunities(): Promise<string[]> {
-  // If store/DB, load here; else single from config
   return [config.collectionMint];
 }
 
 // Stub for updateTradeResult (log to pnlLogger if no store)
 async function updateTradeResult(mint: string, result: any): Promise<void> {
-  // If store, update DB; else already logged
   pnlLogger.logMetrics({ updatedMint: mint, result });
 }
 
 // Real fetch from Magic Eden (listings)
 async function fetchListings(collectionMint: string): Promise<any[]> {  // NFTListing[]
   try {
+    pnlLogger.logMetrics({ message: `Fetching listings for collection: ${collectionMint}` });
     const response = await axios.get(`https://api-mainnet.magiceden.dev/v2/collections/${collectionMint}/listings?offset=0&limit=50`);
-    return response.data.map((item: any) => ({
+    const listings = response.data.map((item: any) => ({
       mint: item.tokenMint,
       auctionHouse: 'MagicEden',
       price: new BN(item.price * 1e9),  // Lamports
@@ -53,6 +52,8 @@ async function fetchListings(collectionMint: string): Promise<any[]> {  // NFTLi
       currency: 'SOL',
       timestamp: Date.now(),
     }));
+    pnlLogger.logMetrics({ message: `Fetched ${listings.length} listings` });
+    return listings;
   } catch (err) {
     pnlLogger.logError(err as Error, { collectionMint });
     return [];
@@ -62,8 +63,9 @@ async function fetchListings(collectionMint: string): Promise<any[]> {  // NFTLi
 // Real fetch from Tensor (bids)
 async function fetchBids(collectionMint: string): Promise<any[]> {  // NFTBid[]
   try {
+    pnlLogger.logMetrics({ message: `Fetching bids for collection: ${collectionMint}` });
     const response = await axios.get(`https://api.tensor.trade/v1/collections/${collectionMint}/bids?limit=50`);
-    return response.data.map((item: any) => ({
+    const bids = response.data.map((item: any) => ({
       mint: item.mint,
       auctionHouse: 'Tensor',
       price: new BN(item.price * 1e9),
@@ -71,6 +73,8 @@ async function fetchBids(collectionMint: string): Promise<any[]> {  // NFTBid[]
       currency: 'SOL',
       timestamp: Date.now(),
     }));
+    pnlLogger.logMetrics({ message: `Fetched ${bids.length} bids` });
+    return bids;
   } catch (err) {
     pnlLogger.logError(err as Error, { collectionMint });
     return [];
@@ -78,19 +82,17 @@ async function fetchBids(collectionMint: string): Promise<any[]> {  // NFTBid[]
 }
 
 async function runBot() {
-  pnlLogger.logInfo("🚀 Flashloan Arbitrage Bot starting up...");
+  pnlLogger.logMetrics({ message: "🚀 Flashloan Arbitrage Bot starting up..." });
   
   while (true) {
     const startTime = Date.now();
     try {
-      pnlLogger.logInfo("🔍 Starting new scan cycle...");
+      pnlLogger.logMetrics({ message: "🔍 Starting new scan cycle..." });
       const opportunities = await loadActiveOpportunities();  // Collections
 
       let signals: ArbitrageSignal[] = [];
       for (const collectionMint of opportunities) {
-        pnlLogger.logInfo(`📊 Fetching listings for collection: ${collectionMint}`);
         const listings = await fetchListings(collectionMint);
-        pnlLogger.logInfo(`📊 Fetching bids for collection: ${collectionMint}`);
         const bids = await fetchBids(collectionMint);
         const cycleSignals = await scanForArbitrage(listings, bids, {
           minProfit: config.minProfitLamports,
@@ -100,9 +102,9 @@ async function runBot() {
       }
 
       if (signals.length === 0) {
-        pnlLogger.logInfo("⚠️ No opportunities found. Skipping execution cycle.");
+        pnlLogger.logMetrics({ message: "⚠️ No opportunities found. Skipping execution cycle." });
       } else {
-        pnlLogger.logInfo(`✅ Found ${signals.length} arbitrage signals!`);
+        pnlLogger.logMetrics({ signalsFound: signals.length, message: "✅ Found arbitrage signals!" });
 
         // Sort by net profit desc
         const topSignals = signals
@@ -111,7 +113,7 @@ async function runBot() {
           .slice(0, MAX_CONCURRENT_TRADES);
 
         if (topSignals.length > 0) {
-          pnlLogger.logInfo(`🚀 Executing top ${topSignals.length} signals...`);
+          pnlLogger.logMetrics({ executingSignals: topSignals.length, message: "🚀 Executing top signals..." });
           const trades = await executeBatch(topSignals);  // Your batch func
 
           trades.forEach(trade => {
@@ -119,13 +121,14 @@ async function runBot() {
               botStats.totalTrades++;
               botStats.totalProfit += trade.netProfit.toNumber() / 1e9;
               updateTradeResult(trade.mint, trade);
-              pnlLogger.logInfo(
-                `💰 Trade complete | +${trade.netProfit.toNumber() / 1e9} SOL | Total: ${botStats.totalProfit.toFixed(3)} SOL`
-              );
+              pnlLogger.logMetrics({
+                message: `💰 Trade complete | +${trade.netProfit.toNumber() / 1e9} SOL | Total: ${botStats.totalProfit.toFixed(3)} SOL`,
+                trade,
+              });
             }
           });
         } else {
-          pnlLogger.logInfo("⚡ No profitable signals in this scan.");
+          pnlLogger.logMetrics({ message: "⚡ No profitable signals in this scan." });
         }
       }
 
@@ -136,6 +139,7 @@ async function runBot() {
         totalTrades: botStats.totalTrades,
         totalProfit: botStats.totalProfit,
         signalsFound: signals.length,
+        message: "📈 Cycle complete",
       });
     } catch (err: any) {
       pnlLogger.logError(err, { cycle: 'main loop' });
@@ -147,7 +151,10 @@ async function runBot() {
 
 // Graceful shutdown
 process.on('SIGINT', () => {
-  pnlLogger.logInfo(`Shutting down | Final Stats: ${botStats.totalTrades} trades, ${botStats.totalProfit.toFixed(3)} SOL profit`);
+  pnlLogger.logMetrics({ 
+    message: `Shutting down | Final Stats: ${botStats.totalTrades} trades, ${botStats.totalProfit.toFixed(3)} SOL profit`,
+    finalStats: botStats 
+  });
   pnlLogger.close();
   process.exit(0);
 });
