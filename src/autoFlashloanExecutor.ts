@@ -16,20 +16,23 @@ const payer = Keypair.fromSecretKey(bs58.decode(config.walletPrivateKey));
  */
 export async function executeFlashloanTrade(signal: ArbitrageSignal): Promise<TradeLog | null> {
   try {
+    // 1️⃣ Initialize Solend market
     const market = await SolendMarket.initialize({
       connection,
-      cluster: 'mainnet-beta',
+      cluster: 'mainnet-beta', // live
     });
 
     const borrowAmountSOL = signal.targetListing.price.toNumber() / 1e9;
 
     let txSig: string | undefined;
 
+    // 2️⃣ Execute flash loan
     await market.flashLoan({
       amount: borrowAmountSOL,
-      reserve: 'So11111111111111111111111111111111111111112',
+      reserve: 'So11111111111111111111111111111111111111112', // WSOL
       receiver: payer.publicKey,
       callback: async (_conn, _keypair) => {
+        // 3️⃣ Build marketplace transaction
         const tx: Transaction = await buildExecuteSaleTransaction({
           connection,
           payerKeypair: payer,
@@ -37,19 +40,20 @@ export async function executeFlashloanTrade(signal: ArbitrageSignal): Promise<Tr
           bid: signal.targetBid,
         });
 
-        // Send transaction
+        // 4️⃣ Send transaction
         txSig = await connection.sendTransaction(tx, [payer], {
           skipPreflight: false,
           preflightCommitment: 'confirmed',
         });
 
-        // Log executed trade
+        // 5️⃣ Log executed trade
         pnlLogger.logPnL(signal, txSig, 'executed');
 
-        return tx; // Return transaction object for Solend callback
+        return txSig;
       },
     });
 
+    // 6️⃣ Return trade info for bot stats
     return {
       timestamp: Date.now(),
       mint: signal.targetListing.mint,
@@ -59,7 +63,6 @@ export async function executeFlashloanTrade(signal: ArbitrageSignal): Promise<Tr
       currency: signal.targetListing.currency,
       txSig,
       type: 'executed',
-      executorType: 'flash_loan',
     };
   } catch (err: any) {
     pnlLogger.logPnL(signal, undefined, 'failed');
@@ -69,7 +72,7 @@ export async function executeFlashloanTrade(signal: ArbitrageSignal): Promise<Tr
 }
 
 /**
- * Execute multiple signals sequentially (batch)
+ * Execute multiple signals in batch, sequentially to reduce risks
  */
 export async function executeBatch(signals: ArbitrageSignal[]): Promise<(TradeLog | null)[]> {
   const results: (TradeLog | null)[] = [];
