@@ -1,3 +1,4 @@
+// config.ts
 import dotenv from 'dotenv';
 import BN from 'bn.js';
 
@@ -15,7 +16,6 @@ export interface BotConfig {
   logLevel: string;
   enableCsvLogging: boolean;
   enableJsonLogging: boolean;
-  simulateOnly: boolean;          // ✅ Added
   heliusApiKey?: string;
   magicEdenApiKey?: string;
   telegramBotToken?: string;
@@ -44,9 +44,7 @@ function validateConfig(): BotConfig {
   const minSignals = parseInt(process.env.MIN_SIGNALS || '1', 10);
   if (isNaN(minSignals) || minSignals < 1) throw new Error('MIN_SIGNALS must be a positive integer');
 
-  const simulateOnly = process.env.SIMULATE_ONLY === 'true'; // ✅
-
-  console.log('Config loaded successfully'); // Debug log for Render
+  console.log('Config loaded successfully'); // Debug log
 
   return {
     rpcUrl: process.env.RPC_URL!,
@@ -59,7 +57,6 @@ function validateConfig(): BotConfig {
     logLevel: process.env.LOG_LEVEL || 'info',
     enableCsvLogging: process.env.ENABLE_CSV_LOGGING === 'true',
     enableJsonLogging: process.env.ENABLE_JSON_LOGGING !== 'false',
-    simulateOnly, // ✅
     heliusApiKey: process.env.HELIUS_API_KEY,
     magicEdenApiKey: process.env.MAGIC_EDEN_API_KEY,
     telegramBotToken: process.env.TELEGRAM_BOT_TOKEN,
