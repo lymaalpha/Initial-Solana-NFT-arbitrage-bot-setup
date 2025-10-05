@@ -1,21 +1,24 @@
+import { Connection, Transaction } from '@solana/web3.js';
 import BN from 'bn.js';
 
 export type AuctionHouse = 'MagicEden' | 'Tensor' | 'OpenSea' | 'Solanart' | 'DigitalEyes';
 export type Currency = 'SOL' | 'USDC';
+export type ExecutorType = 'direct' | 'flash_loan';
+export type TradeType = 'signal' | 'executed' | 'failed';
 
 export interface NFTMarketData {
-  mint: string;
+  mint: string; // NFT mint address
   auctionHouse: AuctionHouse;
   price: BN; // Price in lamports for precision
-  assetMint: string; // SPL token mint (e.g., SOL mint)
+  assetMint: string; // SPL token mint (e.g., SOL: So111...)
   currency: Currency;
-  timestamp?: number; // Unix timestamp in milliseconds
-  sellerPubkey?: string; // For tracking and validation
+  timestamp?: number; // Unix timestamp in ms
+  sellerPubkey?: string; // For tracking/validation
 }
 
 export interface NFTListing extends NFTMarketData {
   duration?: number; // Listing duration in seconds
-  reservePrice?: BN; // Reserve price if applicable
+  reservePrice?: BN; // Reserve if applicable
 }
 
 export interface NFTBid extends NFTMarketData {
@@ -26,16 +29,16 @@ export interface NFTBid extends NFTMarketData {
 export interface ArbitrageSignal {
   targetListing: NFTListing;
   targetBid: NFTBid;
-  estimatedNetProfit: BN; // Net profit after fees
-  rawProfit: BN; // Gross profit before fees
-  confidence: number; // Confidence score (0-1)
-  timestamp: number; // Signal generation timestamp
+  estimatedNetProfit: BN; // Net after fees
+  rawProfit: BN; // Gross before fees
+  confidence: number; // Score 0-1
+  timestamp: number; // Signal creation time
 }
 
 export interface TxParams {
-  connection: any; // Connection object
+  connection: Connection; // Typed Solana connection
   walletPubkey: string; // Wallet public key
-  auctionHouse: string;
+  auctionHouse: AuctionHouse; // Enforce enum
   mint: string;
   price: BN;
   buyerTokenAccount?: string;
@@ -43,10 +46,10 @@ export interface TxParams {
 }
 
 export interface FlashLoanParams {
-  amount: number;
-  asset: string;
-  receiver: string;
-  callback: (tx: any) => Promise<any>;
+  amount: number; // In reserve units
+  asset: string; // Reserve mint
+  receiver: string; // Receiver pubkey
+  callback: (flashLoanTx: Transaction) => Promise<Transaction>; // Modify & return tx
 }
 
 export interface TradeLog {
@@ -55,12 +58,12 @@ export interface TradeLog {
   buyPrice: BN;
   sellPrice: BN;
   netProfit: BN;
-  currency: string;
+  currency: Currency;
   txSig?: string;
-  type: 'signal' | 'executed' | 'failed';
+  type: TradeType;
   notes?: string;
   gasUsed?: number;
-  executorType: 'direct' | 'flash_loan';
+  executorType?: ExecutorType; // Optional for flexibility
 }
 
 export interface ScanMetrics {
@@ -69,6 +72,7 @@ export interface ScanMetrics {
   tradesExecuted: number;
   totalProfit: BN;
   averageProfit: BN;
-  successRate: number;
+  successRate: number; // 0-1
   lastScanTime: number;
+  scanDuration?: number; // ms, optional for perf tracking
 }
