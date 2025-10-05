@@ -2,13 +2,14 @@ import {
   Connection,
   PublicKey,
   Transaction,
+  TransactionInstruction,  // Added import
   Keypair,
 } from "@solana/web3.js";
 import { Metaplex, keypairIdentity } from "@metaplex-foundation/js";
 import BN from "bn.js";
-import { NFTListing, NFTBid } from "./types";  // Tie to your types
+import { NFTListing, NFTBid } from "./types";
 
-export type ListingLike = Partial<NFTListing>;  // Extend for partials
+export type ListingLike = Partial<NFTListing>;
 export type BidLike = Partial<NFTBid>;
 
 export async function buildExecuteSaleTransaction(params: {
@@ -21,29 +22,23 @@ export async function buildExecuteSaleTransaction(params: {
 
   try {
     const metaplex = Metaplex.make(connection).use(keypairIdentity(payerKeypair));
-    const ahPubkey = new PublicKey(listing.auctionHouse!);  // Assume set
+    const ahPubkey = new PublicKey(listing.auctionHouse!);
 
-    const auctionHouseObj = await metaplex
-      .auctionHouse()
-      .findByAddress({ address: ahPubkey })
-      .run();
+    // Fixed: Await without .run() (Promise-based)
+    const auctionHouseObj = await metaplex.auctionHouse().findByAddress({ address: ahPubkey });
 
-    const builder = await metaplex.auctionHouse().executeSale({
+    // Fixed: Correct input params for executeSale
+    const { instructions } = await metaplex.auctionHouse().executeSale({
       auctionHouse: auctionHouseObj,
-      buyer: payerKeypair.publicKey,
-      seller: new PublicKey(listing.sellerPubkey || payerKeypair.publicKey.toString()),
+      tokenOwnerRecord: new PublicKey(bid.bidderPubkey || payerKeypair.publicKey.toString()),  // Buyer trade state equiv
       tokenMint: new PublicKey(listing.mint!),
-      price: listing.price!,  // BN passed directly (SDK handles)
+      price: listing.price!,
+      tokenOwner: payerKeypair.publicKey,  // Seller if direct
     });
 
-    let tx: Transaction;
-    if (Array.isArray(builder)) {
-      tx = new Transaction().add(...builder);
-    } else {
-      tx = await builder.toTransaction();
-    }
+    const tx = new Transaction().add(...instructions as TransactionInstruction[]);  // ixs to tx
 
-    // Simulate for safety
+    // Simulate
     const simResult = await connection.simulateTransaction(tx);
     if (simResult.value.err) {
       throw new Error(`Simulation failed: ${simResult.value.err}`);
@@ -67,7 +62,6 @@ export async function buildBuyThenAcceptOfferInstructions(params: {
     return tx.instructions;
   } catch (err) {
     console.warn("Fallback to manual AH execution required:", err);
-    // Stub manual ixs if needed (e.g., from mpl-auction-house)
     throw err;
   }
 }
