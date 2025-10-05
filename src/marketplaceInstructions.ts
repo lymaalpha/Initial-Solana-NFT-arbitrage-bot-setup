@@ -6,6 +6,15 @@ import { NFTListing, NFTBid } from './types';
 export type ListingLike = Partial<NFTListing>;
 export type BidLike = Partial<NFTBid>;
 
+// Mapping human-readable auction houses to on-chain addresses
+const AUCTION_HOUSE_ADDRESSES: Record<string, string> = {
+  MagicEden: '2R9H...replace_with_actual',  // Replace with correct mainnet address
+  Tensor: 'F2gQ...replace_with_actual',
+  OpenSea: '...', // add if used
+  Solanart: '...',
+  DigitalEyes: '...'
+};
+
 export async function executeSale({
   connection,
   payerKeypair,
@@ -22,8 +31,11 @@ export async function executeSale({
 
   const metaplex = Metaplex.make(connection).use(keypairIdentity(payerKeypair));
 
+  // Map human-readable name to on-chain address
+  const auctionHouseAddress =
+    AUCTION_HOUSE_ADDRESSES[listing.auctionHouse] || listing.auctionHouse;
   const auctionHouseObj = await metaplex.auctionHouse().findByAddress({
-    address: new PublicKey(listing.auctionHouse),
+    address: new PublicKey(auctionHouseAddress),
   });
 
   const buyer = bid.bidderPubkey ? new PublicKey(bid.bidderPubkey) : payerKeypair.publicKey;
@@ -42,3 +54,4 @@ export async function executeSale({
 
   return saleResponse; // Contains tx signature and confirmation
 }
+
