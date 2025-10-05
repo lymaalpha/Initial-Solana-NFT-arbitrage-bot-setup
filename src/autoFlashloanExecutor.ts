@@ -1,9 +1,8 @@
 import { Connection, Keypair, Transaction } from '@solana/web3.js';
-import { pnlLogger } from './pnlLogger';
 import { ArbitrageSignal, TradeLog } from './types';
 import { executeSale } from './marketplaceInstructions';
 import { config } from './config';
-import { SolendAction, SolendMarket, SolendReserve } from '@solendprotocol/solend-sdk';
+import { pnlLogger } from './pnlLogger';
 import BN from 'bn.js';
 import bs58 from 'bs58';
 
@@ -12,28 +11,6 @@ const payer = Keypair.fromSecretKey(bs58.decode(config.walletPrivateKey));
 
 export async function executeFlashloanTrade(signal: ArbitrageSignal): Promise<TradeLog | null> {
   try {
-    // 1️⃣ Init Solend market
-    const market = await SolendMarket.initialize({ connection, cluster: 'mainnet-beta' });
-
-    // 2️⃣ Borrow amount in lamports / SOL
-    const borrowAmountSOL = signal.targetListing.price.toNumber() / 1e9;
-
-    // 3️⃣ Build flashloan instructions (WSOL reserve)
-    const wsolReserve = market.reserves.find((r: SolendReserve) => r.config.mint === 'So11111111111111111111111111111111111111112');
-    if (!wsolReserve) throw new Error('WSOL reserve not found');
-
-    const flashLoanTx = new Transaction();
-
-    const flashLoanIx = SolendAction.createFlashLoanIx({
-      sourceReserve: wsolReserve,
-      amount: borrowAmountSOL,
-      receiver: payer.publicKey,
-      programId: market.programId,
-    });
-
-    flashLoanTx.add(flashLoanIx);
-
-    // 4️⃣ Execute NFT sale inside flashloan
     const saleResponse = await executeSale({
       connection,
       payerKeypair: payer,
@@ -41,7 +18,7 @@ export async function executeFlashloanTrade(signal: ArbitrageSignal): Promise<Tr
       bid: signal.targetBid,
     });
 
-    const txSig = saleResponse.response.signature || '';
+    const txSig = saleResponse.signature || '';
 
     pnlLogger.logPnL(signal, txSig, 'executed');
 
