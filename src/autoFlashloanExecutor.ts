@@ -2,7 +2,7 @@
 import { Connection, Keypair, PublicKey, Transaction } from '@solana/web3.js';
 import { SolendMarket } from '@solendprotocol/solend-sdk';
 import BN from 'bn.js';
-import { ArbitrageSignal, TradeLog, ExecutorType } from './types';
+import { ArbitrageSignal, TradeLog } from './types';
 import { pnlLogger } from './pnlLogger';
 import { config } from './config';
 import { buildExecuteSaleTransaction } from './marketplaceInstructions';
@@ -16,40 +16,38 @@ const payer = Keypair.fromSecretKey(bs58.decode(config.walletPrivateKey));
  */
 export async function executeFlashloanTrade(signal: ArbitrageSignal): Promise<TradeLog | null> {
   try {
-    // Initialize Solend market
     const market = await SolendMarket.initialize({
       connection,
-      cluster: 'mainnet-beta', // or 'devnet' for testing
+      cluster: 'mainnet-beta',
     });
 
-    const borrowAmountSOL = signal.targetListing.price.toNumber() / 1e9; // Convert lamports -> SOL
+    const borrowAmountSOL = signal.targetListing.price.toNumber() / 1e9;
 
-    let txSig: string | undefined = undefined;
+    let txSig: string | undefined;
 
     await market.flashLoan({
       amount: borrowAmountSOL,
-      reserve: 'So11111111111111111111111111111111111111112', // WSOL
-      receiver: payer.publicKey, // must be PublicKey
+      reserve: 'So11111111111111111111111111111111111111112',
+      receiver: payer.publicKey,
       callback: async (_conn, _keypair) => {
-        // Build marketplace transaction
         const tx: Transaction = await buildExecuteSaleTransaction({
           connection,
           payerKeypair: payer,
           listing: signal.targetListing,
-          bid: signal.targetBid
+          bid: signal.targetBid,
         });
 
-        // Send transaction and capture signature
+        // Send transaction
         txSig = await connection.sendTransaction(tx, [payer], {
           skipPreflight: false,
-          preflightCommitment: 'confirmed'
+          preflightCommitment: 'confirmed',
         });
 
         // Log executed trade
         pnlLogger.logPnL(signal, txSig, 'executed');
 
-        return txSig;
-      }
+        return tx; // Return transaction object for Solend callback
+      },
     });
 
     return {
@@ -61,9 +59,8 @@ export async function executeFlashloanTrade(signal: ArbitrageSignal): Promise<Tr
       currency: signal.targetListing.currency,
       txSig,
       type: 'executed',
-      executorType: 'flash_loan'
+      executorType: 'flash_loan',
     };
-
   } catch (err: any) {
     pnlLogger.logPnL(signal, undefined, 'failed');
     await pnlLogger.logError(err, { signal });
@@ -72,7 +69,7 @@ export async function executeFlashloanTrade(signal: ArbitrageSignal): Promise<Tr
 }
 
 /**
- * Execute multiple signals in parallel (batch)
+ * Execute multiple signals sequentially (batch)
  */
 export async function executeBatch(signals: ArbitrageSignal[]): Promise<(TradeLog | null)[]> {
   const results: (TradeLog | null)[] = [];
