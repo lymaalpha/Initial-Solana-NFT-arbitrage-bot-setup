@@ -1,40 +1,30 @@
-// main.ts
-import { Connection, Keypair } from "@solana/web3.js";
-import { scanForArbitrage } from "./scanForArbitrage";
-import { executeBatch } from "./autoFlashloanExecutor";
-import { pnlLogger } from "./pnlLogger";
-import { config } from "./config";
-import { ArbitrageSignal } from "./types";
-import axios from "axios";
-import BN from "bn.js";
-import bs58 from "bs58";
+import { Connection, Keypair } from '@solana/web3.js';
+import { scanForArbitrage } from './scanForArbitrage';
+import { executeBatch } from './autoFlashloanExecutor';
+import { pnlLogger } from './pnlLogger';
+import { config } from './config';
+import { ArbitrageSignal } from './types';
+import axios from 'axios';
+import BN from 'bn.js';
+import bs58 from 'bs58';
 
-// Initialize Solana connection and payer
-const connection = new Connection(config.rpcUrl, "confirmed");
+// Connection & wallet
+const connection = new Connection(config.rpcUrl, 'confirmed');
 const payer = Keypair.fromSecretKey(bs58.decode(config.walletPrivateKey));
 
-// Runtime settings
 const SCAN_INTERVAL_MS = config.scanIntervalMs;
-const MAX_CONCURRENT_TRADES = 2; // ⚠️ Safe concurrent trades for flashloans
+const MAX_CONCURRENT_TRADES = config.minSignals;
 
-// Bot stats
-interface BotStats {
-  totalProfitLamports: BN;
-  totalTrades: number;
-  lastScan: number;
-}
-const botStats: BotStats = {
-  totalProfitLamports: new BN(0),
-  totalTrades: 0,
-  lastScan: 0,
-};
+// Stats
+interface BotStats { totalProfit: number; totalTrades: number; lastScan: number; }
+const botStats: BotStats = { totalProfit: 0, totalTrades: 0, lastScan: 0 };
 
 // Load collections (stub)
 async function loadActiveOpportunities(): Promise<string[]> {
   return [config.collectionMint];
 }
 
-// Update trade results (stub for persistent logging)
+// Update trade result (stub / logs)
 async function updateTradeResult(mint: string, result: any): Promise<void> {
   pnlLogger.logMetrics({ updatedMint: mint, result });
 }
@@ -47,12 +37,11 @@ async function fetchListings(collectionMint: string) {
     );
     return resp.data.map((item: any) => ({
       mint: item.tokenMint,
-      auctionHouse: "MagicEden",
-      price: new BN(item.price * 1e9), // Convert SOL -> lamports
-      assetMint: "So11111111111111111111111111111111111111112",
-      currency: "SOL",
+      auctionHouse: 'MagicEden',
+      price: new BN(item.price * 1e9),
+      assetMint: 'So11111111111111111111111111111111111111112',
+      currency: 'SOL',
       timestamp: Date.now(),
-      sellerPubkey: item.seller,
     }));
   } catch (err) {
     pnlLogger.logError(err as Error, { collectionMint });
@@ -68,12 +57,11 @@ async function fetchBids(collectionMint: string) {
     );
     return resp.data.map((item: any) => ({
       mint: item.mint,
-      auctionHouse: "Tensor",
-      price: new BN(item.price * 1e9), // Convert SOL -> lamports
-      assetMint: "So11111111111111111111111111111111111111112",
-      currency: "SOL",
+      auctionHouse: 'Tensor',
+      price: new BN(item.price * 1e9),
+      assetMint: 'So11111111111111111111111111111111111111112',
+      currency: 'SOL',
       timestamp: Date.now(),
-      bidderPubkey: item.buyer,
     }));
   } catch (err) {
     pnlLogger.logError(err as Error, { collectionMint });
@@ -83,79 +71,73 @@ async function fetchBids(collectionMint: string) {
 
 // Main bot loop
 async function runBot() {
-  pnlLogger.logMetrics({ message: "🚀 Flashloan Arbitrage Bot starting..." });
+  pnlLogger.logMetrics({ message: '🚀 Flashloan Arbitrage Bot starting...' });
 
   while (true) {
-    const cycleStart = Date.now();
+    const startTime = Date.now();
+
     try {
       const opportunities = await loadActiveOpportunities();
       let signals: ArbitrageSignal[] = [];
 
-      for (const collectionMint of opportunities) {
-        const listings = await fetchListings(collectionMint);
-        const bids = await fetchBids(collectionMint);
-
+      for (const mint of opportunities) {
+        const listings = await fetchListings(mint);
+        const bids = await fetchBids(mint);
         const cycleSignals = await scanForArbitrage(listings, bids, {
           minProfit: config.minProfitLamports,
           feeAdjustment: config.feeBufferLamports,
         });
-
         signals = signals.concat(cycleSignals);
       }
 
       if (!signals.length) {
-        pnlLogger.logMetrics({ message: "⚠️ No arbitrage opportunities found." });
+        pnlLogger.logMetrics({ message: '⚠️ No opportunities found.' });
       } else {
         const topSignals = signals
           .filter((s) => s.estimatedNetProfit.gt(new BN(0)))
           .sort((a, b) => b.estimatedNetProfit.sub(a.estimatedNetProfit).toNumber())
           .slice(0, MAX_CONCURRENT_TRADES);
 
-        for (const signal of topSignals) {
-          try {
-            pnlLogger.logMetrics({ message: `🚀 Executing trade for ${signal.targetListing.mint}` });
-            const [trade] = await executeBatch([signal]);
+        if (topSignals.length > 0) {
+          pnlLogger.logMetrics({ message: `🚀 Executing top ${topSignals.length} signals...` });
+          const trades = await executeBatch(topSignals);
 
+          trades.forEach((trade) => {
             if (trade) {
               botStats.totalTrades++;
-              botStats.totalProfitLamports = botStats.totalProfitLamports.add(trade.netProfit);
-              await updateTradeResult(trade.mint, trade);
-
+              botStats.totalProfit += trade.netProfit.toNumber() / 1e9;
+              updateTradeResult(trade.mint, trade);
               pnlLogger.logMetrics({
-                message: `💰 Trade complete | +${trade.netProfit.toNumber() / 1e9} SOL | Total: ${
-                  botStats.totalProfitLamports.toNumber() / 1e9
-                } SOL`,
+                message: `💰 Trade complete | +${trade.netProfit.toNumber() / 1e9} SOL | Total: ${botStats.totalProfit.toFixed(3)} SOL`,
                 trade,
               });
             }
-          } catch (tradeErr: any) {
-            pnlLogger.logError(tradeErr, { signal, message: "Trade execution failed" });
-          }
+          });
+        } else {
+          pnlLogger.logMetrics({ message: '⚡ No profitable signals in this scan.' });
         }
       }
 
       botStats.lastScan = Date.now();
       pnlLogger.logMetrics({
-        message: "📈 Scan cycle complete",
-        cycleTimeSec: (Date.now() - cycleStart) / 1000,
+        cycleTime: (Date.now() - startTime) / 1000,
         totalTrades: botStats.totalTrades,
-        totalProfitSOL: botStats.totalProfitLamports.toNumber() / 1e9,
+        totalProfit: botStats.totalProfit,
         signalsFound: signals.length,
+        message: '📈 Cycle complete',
       });
     } catch (err: any) {
-      pnlLogger.logError(err, { cycle: "main loop" });
+      pnlLogger.logError(err, { cycle: 'main loop' });
     }
 
-    await new Promise((resolve) => setTimeout(resolve, SCAN_INTERVAL_MS));
+    await new Promise((res) => setTimeout(res, SCAN_INTERVAL_MS));
   }
 }
 
 // Graceful shutdown
-process.on("SIGINT", () => {
+process.on('SIGINT', () => {
   pnlLogger.logMetrics({
-    message: `Shutting down | Trades: ${botStats.totalTrades} | Profit: ${
-      botStats.totalProfitLamports.toNumber() / 1e9
-    } SOL`,
+    message: `Shutting down | ${botStats.totalTrades} trades, ${botStats.totalProfit.toFixed(3)} SOL profit`,
     finalStats: botStats,
   });
   pnlLogger.close();
