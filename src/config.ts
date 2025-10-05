@@ -1,42 +1,26 @@
-import dotenv from 'dotenv';
-import BN from 'bn.js';
+// src/config.ts
+export const config = {
+  // RPC & Wallet
+  rpcUrl: process.env.RPC_URL || "https://mainnet.helius-rpc.com/?api-key=YOUR_HELIUS_KEY",
+  heliusApiKey: process.env.HELIUS_API_KEY || "YOUR_HELIUS_KEY",
+  walletPrivateKey: process.env.WALLET_PRIVATE_KEY || "",
 
-dotenv.config();
+  // Bot settings
+  minProfitLamports: 0.01 * 1e9, // Minimum profit to execute trade
+  feeBufferLamports: 0.01 * 1e9, // Extra buffer for fees
+  scanIntervalMs: parseInt(process.env.SCAN_INTERVAL_MS || "5000"),
+  maxConcurrentTrades: 2, // How many trades to execute simultaneously
 
-export interface BotConfig {
-  rpcUrl: string;
-  walletPrivateKey: string;
-  collectionMint: string;
-  scanIntervalMs: number;
-  minSignals: number;
-  minProfitLamports: BN;
-  feeBufferLamports: BN;
-  logLevel: string;
-  heliusApiKey: string;
-  telegramBotToken?: string;
-  telegramChatId?: string;
-  discordWebhookUrl?: string;
-}
-
-function parseNumber(value: string | undefined, defaultValue: number, name: string): number {
-  const num = parseFloat(value || defaultValue.toString());
-  if (isNaN(num) || num < 0) {
-    throw new Error(`Invalid ${name}: must be positive (got ${value})`);
-  }
-  return num;
-}
-
-export const config: BotConfig = {
-  rpcUrl: process.env.RPC_URL!,
-  walletPrivateKey: process.env.PRIVATE_KEY!,
-  collectionMint: process.env.COLLECTION_MINT!,
-  scanIntervalMs: parseNumber(process.env.SCAN_INTERVAL_MS, 5000, 'SCAN_INTERVAL_MS'),
-  minSignals: parseInt(process.env.MIN_SIGNALS || '1', 10),
-  minProfitLamports: new BN(parseNumber(process.env.MIN_PROFIT_SOL, 0.05, 'MIN_PROFIT_SOL') * 1e9),
-  feeBufferLamports: new BN(parseNumber(process.env.FEE_BUFFER_SOL, 0.02, 'FEE_BUFFER_SOL') * 1e9),
-  logLevel: process.env.LOG_LEVEL || 'info',
-  heliusApiKey: process.env.HELIUS_API_KEY!,
-  telegramBotToken: process.env.TELEGRAM_BOT_TOKEN,
-  telegramChatId: process.env.TELEGRAM_CHAT_ID,
-  discordWebhookUrl: process.env.DISCORD_WEBHOOK_URL,
+  // Collections
+  COLLECTIONS: [
+    "J1S9H3QjnRtBbbuD4HjPsRy5uXkTVMJbvXWB7R9X", // Mad Lads
+    "3saAedkM9o5g1u5DCqsuMZuC4GRqPB4TuMkvSsSVvGQ3", // Okay Bears
+    "6XxjKYFbcndh2gDcsUrmZgVEsoDxXMH3VYKpnMbbwjQ", // DeGods
+    "SMBH3wF6baUj3P1VeYPBrVZKWvS9RLnHxtMuMw2VXh", // Solana Monkey Business
+    "9ARngHhVaCtH5JFieRdSS5Y8cdZk2TMF4tfGSWPB4w", // Degenerate Ape Academy
+    "AURYydfxJib1y1WiPiZ3jKAE2qbNy64eiVxuzbQ2FqSLw", // Aurory
+    "7gxsWbTCQTtjuLgbemZkGT4TdALZo7CE8YJjjKnXE", // Thugbirdz
+    "66MZJWWM7ucWay8R2BzYgZVQHo3X2ZviYvCi4BCr42u6", // Solana Money Boys
+    "DTPkJWwRYi5RuKX4qyJY1H6H5kVWRzqSgq7XFzMweWwH" // Degen Trash Pandas
+  ]
 };
