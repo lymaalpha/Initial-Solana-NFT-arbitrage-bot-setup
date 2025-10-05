@@ -21,8 +21,10 @@
     "noFallthroughCasesInSwitch": true,
     "moduleResolution": "node",
     "allowSyntheticDefaultImports": true,
-    "experimentalDecorators": true,
-    "emitDecoratorMetadata": true
+    // "experimentalDecorators": true,  // Uncomment if using decorators (e.g., in AI flows)
+    // "emitDecoratorMetadata": true,
+    "incremental": true,  // Faster rebuilds on Render
+    "composite": true     // Enables incremental + project refs
   },
   "include": [
     "src/**/*"
