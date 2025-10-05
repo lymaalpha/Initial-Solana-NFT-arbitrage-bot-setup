@@ -1,7 +1,6 @@
-import { Connection, Transaction } from '@solana/web3.js';
 import BN from 'bn.js';
 
-export type AuctionHouse = 'MagicEden' | 'Tensor' | 'OpenSea' | 'Solanart' | 'DigitalEyes';
+export type AuctionHouse = 'MagicEden' | 'Tensor' | 'OpenSea';
 export type Currency = 'SOL' | 'USDC';
 export type ExecutorType = 'direct' | 'flash_loan';
 export type TradeType = 'signal' | 'executed' | 'failed';
