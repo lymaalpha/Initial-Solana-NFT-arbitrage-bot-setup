@@ -1,19 +1,10 @@
-import {
-  Connection,
-  PublicKey,
-  Transaction,
-  Keypair,
-  TransactionInstruction,
-} from "@solana/web3.js";
-import { Metaplex, keypairIdentity, AuctionHouse, TransactionBuilder } from "@metaplex-foundation/js";
+import { Connection, PublicKey, Transaction, TransactionInstruction, Keypair } from "@solana/web3.js";
+import { Metaplex, keypairIdentity } from "@metaplex-foundation/js";
 import { NFTListing, NFTBid } from "./types";
 
 export type ListingLike = Partial<NFTListing>;
 export type BidLike = Partial<NFTBid>;
 
-/**
- * Build a Transaction for executing a sale on the Auction House.
- */
 export async function buildExecuteSaleTransaction(params: {
   connection: Connection;
   payerKeypair: Keypair;
@@ -26,29 +17,42 @@ export async function buildExecuteSaleTransaction(params: {
     const metaplex = Metaplex.make(connection).use(keypairIdentity(payerKeypair));
     const ahPubkey = new PublicKey(listing.auctionHouse!);
 
-    // Load Auction House object
-    const auctionHouseObj: AuctionHouse = await metaplex
-      .auctionHouse()
-      .findByAddress({ address: ahPubkey });
+    const auctionHouseObj = await metaplex.auctionHouse().findByAddress({ address: ahPubkey });
 
-    // Build execute sale TransactionBuilder
-    const txBuilder: TransactionBuilder = await metaplex
-      .auctionHouse()
-      .executeSale({
-        auctionHouse: auctionHouseObj,
-        buyer: new PublicKey(bid.bidderPubkey || payerKeypair.publicKey.toString()),
-        seller: new PublicKey(listing.sellerPubkey || payerKeypair.publicKey.toString()),
-        tokenMint: new PublicKey(listing.mint!),
-        price: listing.price!,
-      });
+    // Compute seller/buyer trade states
+    const sellerTradeState = await metaplex.auctionHouse().findTradeState({
+      auctionHouse: auctionHouseObj,
+      wallet: payerKeypair.publicKey,
+      tokenMint: new PublicKey(listing.mint!),
+      tokenAccount: new PublicKey(listing.tokenAccount!),
+      price: listing.price!,
+      tokens: 1,
+    });
 
-    // Convert TransactionBuilder to a Transaction
+    const buyerTradeState = await metaplex.auctionHouse().findTradeState({
+      auctionHouse: auctionHouseObj,
+      wallet: new PublicKey(bid.bidderPubkey || payerKeypair.publicKey.toString()),
+      tokenMint: new PublicKey(listing.mint!),
+      tokenAccount: new PublicKey(bid.tokenAccount!),
+      price: listing.price!,
+      tokens: 1,
+    });
+
+    // Build TransactionBuilder
+    const txBuilder = await metaplex.auctionHouse().executeSale({
+      auctionHouse: auctionHouseObj,
+      sellerTradeState,
+      buyerTradeState,
+      tokenMint: new PublicKey(listing.mint!),
+      price: listing.price!,
+    });
+
+    // Convert TransactionBuilder to Transaction
     const tx = new Transaction();
     for (const ix of txBuilder.getInstructions()) {
       tx.add(ix as TransactionInstruction);
     }
 
-    // Simulate before sending
     const simResult = await connection.simulateTransaction(tx);
     if (simResult.value.err) {
       throw new Error(`Simulation failed: ${simResult.value.err}`);
@@ -56,14 +60,11 @@ export async function buildExecuteSaleTransaction(params: {
 
     return tx;
   } catch (err) {
-    console.error("Sale transaction build failed:", err);
+    console.error("Sale tx build failed:", err);
     throw err;
   }
 }
 
-/**
- * Helper to get raw instructions for advanced handling
- */
 export async function buildBuyThenAcceptOfferInstructions(params: {
   connection: Connection;
   payerKeypair: Keypair;
@@ -74,7 +75,7 @@ export async function buildBuyThenAcceptOfferInstructions(params: {
     const tx = await buildExecuteSaleTransaction(params);
     return tx.instructions;
   } catch (err) {
-    console.warn("Fallback to manual Auction House execution required:", err);
+    console.warn("Fallback to manual AH execution required:", err);
     throw err;
   }
 }
