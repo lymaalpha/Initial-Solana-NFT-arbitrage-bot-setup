@@ -1,6 +1,7 @@
 import { NFTListing, NFTBid, ArbitrageSignal } from "./types";
 import BN from 'bn.js';
-import { pnlLogger } from '../utils/pnlLogger';
+import { pnlLogger } from "./pnlLogger";  // Fixed: Flat src/ path
+import { config } from "./config";  // Tie to global config for defaults
 
 interface ScanOptions {
   minProfit?: BN;
@@ -8,8 +9,6 @@ interface ScanOptions {
   maxAge?: number; // Maximum age of listings/bids in milliseconds
 }
 
-const DEFAULT_FEE_LAMPORTS = new BN(2000000); // ~0.002 SOL for fees + tx
-const DEFAULT_MIN_PROFIT_LAMPORTS = new BN(50000000); // 0.05 SOL threshold
 const DEFAULT_MAX_AGE = 5 * 60 * 1000; // 5 minutes
 
 export async function scanForArbitrage(
@@ -18,8 +17,8 @@ export async function scanForArbitrage(
   options: ScanOptions = {}
 ): Promise<ArbitrageSignal[]> {
   const { 
-    minProfit = DEFAULT_MIN_PROFIT_LAMPORTS, 
-    feeAdjustment = DEFAULT_FEE_LAMPORTS,
+    minProfit = config.minProfitLamports,  // From config
+    feeAdjustment = config.feeBufferLamports,
     maxAge = DEFAULT_MAX_AGE
   } = options;
 
@@ -94,14 +93,15 @@ export async function scanForArbitrage(
     signals.sort((a, b) => {
       const profitDiff = b.estimatedNetProfit.sub(a.estimatedNetProfit).toNumber();
       if (profitDiff !== 0) return profitDiff;
-      return b.confidence - a.confidence;
+      return (b.confidence || 0) - (a.confidence || 0);  // Optional chaining
     });
 
     if (signals.length > 0) {
+      const avgProfit = signals.reduce((sum, s) => sum.add(s.estimatedNetProfit), new BN(0)).div(new BN(signals.length));
       pnlLogger.logMetrics({
         signalsFound: signals.length,
         topSignalProfit: signals[0].estimatedNetProfit.toNumber() / 1e9,
-        averageProfit: signals.reduce((sum, s) => sum + s.estimatedNetProfit.toNumber(), 0) / signals.length / 1e9,
+        averageProfit: avgProfit.toNumber() / 1e9,
         scanDuration: Date.now() - now
       });
     }
