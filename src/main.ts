@@ -6,7 +6,6 @@ import { config } from './config';
 import BN from 'bn.js';
 import axios from 'axios';
 import bs58 from 'bs58';
-import { ArbitrageSignal, TradeLog } from './types';
 
 const connection = new Connection(config.rpcUrl, 'confirmed');
 const payer = Keypair.fromSecretKey(bs58.decode(config.walletPrivateKey));
@@ -25,7 +24,7 @@ async function loadActiveOpportunities(): Promise<string[]> {
   return [config.collectionMint];
 }
 
-async function updateTradeResult(mint: string, result: TradeLog): Promise<void> {
+async function updateTradeResult(mint: string, result: any): Promise<void> {
   pnlLogger.logMetrics({ updatedMint: mint, result });
 }
 
@@ -60,7 +59,7 @@ async function runBot() {
     const startTime = Date.now();
     try {
       const opportunities = await loadActiveOpportunities();
-      let signals: ArbitrageSignal[] = [];
+      let signals: any[] = [];
 
       for (const collectionMint of opportunities) {
         const listings = await fetchListings(collectionMint);
@@ -81,7 +80,7 @@ async function runBot() {
 
       if (topSignals.length > 0) {
         pnlLogger.logMetrics({ message: `🚀 Executing top ${topSignals.length} signals...` });
-        const trades: (TradeLog | null)[] = await executeBatch(topSignals);
+        const trades = await executeBatch(topSignals);
 
         trades.forEach((trade) => {
           if (trade) {
