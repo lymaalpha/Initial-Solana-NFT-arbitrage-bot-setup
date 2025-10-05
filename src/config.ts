@@ -1,8 +1,6 @@
-// config.ts
 import dotenv from 'dotenv';
 import BN from 'bn.js';
 
-// Load environment variables
 dotenv.config();
 
 export interface BotConfig {
@@ -25,26 +23,20 @@ export interface BotConfig {
 
 function parseNumber(value: string | undefined, defaultValue: number, name: string): number {
   const num = parseFloat(value || defaultValue.toString());
-  if (isNaN(num) || num < 0) {
-    throw new Error(`Invalid ${name}: must be a positive number (got ${value})`);
-  }
+  if (isNaN(num) || num < 0) throw new Error(`Invalid ${name}: ${value}`);
   return num;
 }
 
 function validateConfig(): BotConfig {
   const requiredVars = ['RPC_URL', 'PRIVATE_KEY', 'COLLECTION_MINT'];
-  const missing = requiredVars.filter(varName => !process.env[varName]);
-  if (missing.length > 0) {
-    throw new Error(`Missing required environment variables: ${missing.join(', ')}`);
-  }
+  const missing = requiredVars.filter(v => !process.env[v]);
+  if (missing.length) throw new Error(`Missing environment variables: ${missing.join(', ')}`);
 
   const minProfitSOL = parseNumber(process.env.MIN_PROFIT_SOL, 0.05, 'MIN_PROFIT_SOL');
   const feeBufferSOL = parseNumber(process.env.FEE_BUFFER_SOL, 0.02, 'FEE_BUFFER_SOL');
   const scanIntervalMs = parseNumber(process.env.SCAN_INTERVAL_MS, 5000, 'SCAN_INTERVAL_MS');
   const minSignals = parseInt(process.env.MIN_SIGNALS || '1', 10);
-  if (isNaN(minSignals) || minSignals < 1) throw new Error('MIN_SIGNALS must be a positive integer');
-
-  console.log('Config loaded successfully'); // Debug log
+  if (isNaN(minSignals) || minSignals < 1) throw new Error('MIN_SIGNALS invalid');
 
   return {
     rpcUrl: process.env.RPC_URL!,
