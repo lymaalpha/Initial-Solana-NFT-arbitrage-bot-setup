@@ -1,72 +1,98 @@
-import dotenv from 'dotenv';
+// main.ts
+import { Connection, Keypair } from '@solana/web3.js';
+import { scanForArbitrage } from './scanForArbitrage';
+import { executeBatch } from './autoFlashloanExecutor';
+import { pnlLogger } from './pnlLogger';
+import { config } from './config';
 import BN from 'bn.js';
+import bs58 from 'bs58';
 
-// Load environment variables
-dotenv.config();
+import { fetchListings } from './heliusMarketplace';
+import { fetchBids } from './tensorMarketplace';
 
-export interface BotConfig {
-  rpcUrl: string;
-  walletPrivateKey: string;
-  collectionMint: string;
-  scanIntervalMs: number;
-  minSignals: number;
-  minProfitLamports: BN;
-  feeBufferLamports: BN;
-  logLevel: string;
-  enableCsvLogging: boolean;
-  enableJsonLogging: boolean;
-  heliusApiKey?: string;
-  magicEdenApiKey?: string;
-  telegramBotToken?: string;
-  telegramChatId?: string;
-  discordWebhookUrl?: string;
+const connection = new Connection(config.rpcUrl, 'confirmed');
+const payer = Keypair.fromSecretKey(bs58.decode(config.walletPrivateKey));
+
+const SCAN_INTERVAL_MS = config.scanIntervalMs;
+const MAX_CONCURRENT_TRADES = config.minSignals;
+
+interface BotStats {
+  totalProfit: number;
+  totalTrades: number;
+  lastScan: number;
+}
+const botStats: BotStats = { totalProfit: 0, totalTrades: 0, lastScan: 0 };
+
+async function runBot() {
+  pnlLogger.logMetrics({ message: '🚀 Flashloan Arbitrage Bot starting...' });
+
+  while (true) {
+    const startTime = Date.now();
+    try {
+      const opportunities = [config.collectionMint];
+      let signals: any[] = [];
+
+      for (const collectionMint of opportunities) {
+        const listings = await fetchListings(collectionMint);
+        const bids = await fetchBids(collectionMint);
+
+        const cycleSignals = await scanForArbitrage(listings, bids, {
+          minProfit: config.minProfitLamports,
+          feeAdjustment: config.feeBufferLamports,
+        });
+
+        signals = signals.concat(cycleSignals);
+      }
+
+      const topSignals = signals
+        .filter((s) => s.estimatedNetProfit.gt(new BN(0)))
+        .sort((a, b) => b.estimatedNetProfit.sub(a.estimatedNetProfit).toNumber())
+        .slice(0, MAX_CONCURRENT_TRADES);
+
+      if (topSignals.length > 0) {
+        pnlLogger.logMetrics({ message: `🚀 Executing top ${topSignals.length} signals...` });
+        const trades = await executeBatch(topSignals);
+
+        trades.forEach((trade) => {
+          if (trade) {
+            botStats.totalTrades++;
+            botStats.totalProfit += trade.netProfit.toNumber() / 1e9;
+            pnlLogger.logMetrics({
+              message: `💰 Trade complete | +${trade.netProfit.toNumber() / 1e9} SOL | Total: ${botStats.totalProfit.toFixed(3)} SOL`,
+              trade,
+            });
+          }
+        });
+      } else {
+        pnlLogger.logMetrics({ message: '⚡ No profitable signals in this scan.' });
+      }
+
+      botStats.lastScan = Date.now();
+      pnlLogger.logMetrics({
+        cycleTime: (Date.now() - startTime) / 1000,
+        totalTrades: botStats.totalTrades,
+        totalProfit: botStats.totalProfit,
+        signalsFound: signals.length,
+        message: '📈 Cycle complete',
+      });
+    } catch (err: any) {
+      pnlLogger.logError(err, { cycle: 'main loop' });
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, SCAN_INTERVAL_MS));
+  }
 }
 
-function parseNumber(value: string | undefined, defaultValue: number, name: string): number {
-  const num = parseFloat(value || defaultValue.toString());
-  if (isNaN(num) || num < 0) {
-    throw new Error(`Invalid ${name}: must be a positive number (got ${value})`);
-  }
-  return num;
-}
+process.on('SIGINT', () => {
+  pnlLogger.logMetrics({
+    message: `Shutting down | ${botStats.totalTrades} trades, ${botStats.totalProfit.toFixed(3)} SOL profit`,
+    finalStats: botStats,
+  });
+  pnlLogger.close();
+  process.exit(0);
+});
 
-function validateConfig(): BotConfig {
-  const requiredVars = ['RPC_URL', 'PRIVATE_KEY', 'COLLECTION_MINT'];
-  const missing = requiredVars.filter(varName => !process.env[varName]);
-  
-  if (missing.length > 0) {
-    throw new Error(`Missing required environment variables: ${missing.join(', ')}`);
-  }
-
-  const minProfitSOL = parseNumber(process.env.MIN_PROFIT_SOL, 0.05, 'MIN_PROFIT_SOL');
-  const feeBufferSOL = parseNumber(process.env.FEE_BUFFER_SOL, 0.02, 'FEE_BUFFER_SOL');
-  const scanIntervalMs = parseNumber(process.env.SCAN_INTERVAL_MS, 5000, 'SCAN_INTERVAL_MS');
-  const minSignals = parseInt(process.env.MIN_SIGNALS || '1', 10);
-  if (isNaN(minSignals) || minSignals < 1) {
-    throw new Error('MIN_SIGNALS must be a positive integer');
-  }
-
-  console.log('Config loaded successfully'); // Debug log for Render
-
-  return {
-    rpcUrl: process.env.RPC_URL!,
-    walletPrivateKey: process.env.PRIVATE_KEY!,
-    collectionMint: process.env.COLLECTION_MINT!,
-    scanIntervalMs: scanIntervalMs,
-    minSignals: minSignals,
-    minProfitLamports: new BN(minProfitSOL * 1e9), // Convert SOL to lamports
-    feeBufferLamports: new BN(feeBufferSOL * 1e9),
-    logLevel: process.env.LOG_LEVEL || 'info',
-    enableCsvLogging: process.env.ENABLE_CSV_LOGGING === 'true',
-    enableJsonLogging: process.env.ENABLE_JSON_LOGGING !== 'false',
-    heliusApiKey: process.env.HELIUS_API_KEY,
-    magicEdenApiKey: process.env.MAGIC_EDEN_API_KEY,
-    telegramBotToken: process.env.TELEGRAM_BOT_TOKEN,
-    telegramChatId: process.env.TELEGRAM_CHAT_ID,
-    discordWebhookUrl: process.env.DISCORD_WEBHOOK_URL,
-  };
-}
-
-export const config = validateConfig();
-
-export default config;
+runBot().catch((err) => {
+  pnlLogger.logError(err);
+  process.exit(1);
+});
