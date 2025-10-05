@@ -1,22 +1,18 @@
 import { Connection, Keypair, PublicKey, Transaction, sendAndConfirmTransaction } from "@solana/web3.js";
-import { SolendAction, SolendMarket } from "@solendprotocol/solend-sdk";
-import { ArbitrageSignal, TradeLog } from "./types";  // Typed signal
-import { buildExecuteSaleTransaction } from "./marketplaceInstructions";  // Real marketplace ixs
-import { pnlLogger } from "./pnlLogger";  // Your logger
+import { SolendAction, SolendMarketV2 } from "@solendprotocol/solend-sdk";  // V2 for constructor
+import { ArbitrageSignal, TradeLog } from "./types";
+import { buildExecuteSaleTransaction } from "./marketplaceInstructions";
+import { pnlLogger } from "./pnlLogger";
 import { config } from "./config";
 import BN from 'bn.js';
-import bs58 from 'bs58';  // For base58 key decode (npm i bs58)
+import bs58 from 'bs58';
 
 const connection = new Connection(config.rpcUrl, "confirmed");
-
-// Keypair from base58 PRIVATE_KEY (fix from base64)
 const payer = Keypair.fromSecretKey(bs58.decode(config.walletPrivateKey));
 
-// ⚙️ Flash loan reserve (SOL)
 const FLASHLOAN_RESERVE = new PublicKey("So11111111111111111111111111111111111111112");
 
 async function executeMarketplaceArbitrage(signal: ArbitrageSignal): Promise<{ buySig?: string; sellSig?: string }> {
-  // Build real sale tx via marketplace module
   const arbTx = await buildExecuteSaleTransaction({
     connection,
     payerKeypair: payer,
@@ -24,39 +20,39 @@ async function executeMarketplaceArbitrage(signal: ArbitrageSignal): Promise<{ b
       mint: signal.targetListing.mint,
       price: signal.targetListing.price,
       auctionHouse: signal.targetListing.auctionHouse,
-      sellerPubkey: signal.targetListing.sellerPubkey, // Optional
+      sellerPubkey: signal.targetListing.sellerPubkey,
     },
     bid: {
       mint: signal.targetBid.mint,
       price: signal.targetBid.price,
       auctionHouse: signal.targetBid.auctionHouse,
-      bidderPubkey: signal.targetBid.bidderPubkey, // Optional
+      bidderPubkey: signal.targetBid.bidderPubkey,
     },
   });
 
-  // Simulate before callback
   const simResult = await connection.simulateTransaction(arbTx);
   if (simResult.value.err) {
     throw new Error(`Simulation failed: ${simResult.value.err}`);
   }
 
-  // Send the arb tx (in callback, this becomes part of flash loan)
-  const txSig = await sendAndConfirmTransaction(connection, arbTx, [payer], {
-    commitment: 'confirmed',
-    maxRetries: 3,
-  });
+  let txSig: string | undefined;
+  if (!config.simulateOnly) {
+    txSig = await sendAndConfirmTransaction(connection, arbTx, [payer], {
+      commitment: 'confirmed',
+      maxRetries: 3,
+    }).then(s => s);
+  } else {
+    txSig = `sim_tx_${Date.now()}`;
+  }
 
   pnlLogger.logInfo(`✅ Marketplace arb executed: ${txSig}`);
-  return { buySig: txSig, sellSig: txSig };  // Single tx for atomicity
+  return { buySig: txSig, sellSig: txSig };
 }
 
 export async function executeFlashloanArbitrage(signal: ArbitrageSignal): Promise<TradeLog | null> {
   try {
     pnlLogger.logInfo(`⚡ Executing flashloan arbitrage for ${signal.targetListing.mint}`);
-    const market = new SolendMarket({ 
-      connection, 
-      cluster: config.rpcUrl.includes("devnet") ? "devnet" : "mainnet" 
-    });
+    const market = new SolendMarketV2({ connection, cluster: "devnet" });  // V2, fixed cluster
     await market.loadReserves();
 
     const borrowAmountLamports = signal.targetListing.price.add(config.feeBufferLamports);
@@ -64,24 +60,27 @@ export async function executeFlashloanArbitrage(signal: ArbitrageSignal): Promis
 
     pnlLogger.logInfo(`💰 Borrowing ${borrowAmountSOL.toFixed(3)} SOL from Solend...`);
 
-    // Build Flash Loan Transaction
-    const action = await SolendAction.buildFlashLoanTxns(
+    // Fixed: Use flashLoan method
+    const { transaction } = await SolendAction.flashLoan({
       connection,
-      borrowAmountSOL,
-      FLASHLOAN_RESERVE,
-      payer.publicKey,
-      async (conn, keypair) => {
-        // Execute real marketplace arb in callback
+      amount: borrowAmountSOL,
+      reserve: FLASHLOAN_RESERVE,
+      receiver: payer.publicKey,
+      callback: async (conn: Connection, keypair: Keypair) => {
         const { buySig, sellSig } = await executeMarketplaceArbitrage(signal);
         pnlLogger.logInfo(`✅ Buy TX: ${buySig} | Sell TX: ${sellSig}`);
-      }
-    );
-
-    const tx = new Transaction().add(...action.txns);
-    const txSig = await sendAndConfirmTransaction(connection, tx, [payer], {
-      commitment: 'confirmed',
-      maxRetries: 3,
+      },
     });
+
+    let txSig: string | undefined;
+    if (!config.simulateOnly) {
+      txSig = await sendAndConfirmTransaction(connection, transaction, [payer], {
+        commitment: 'confirmed',
+        maxRetries: 3,
+      }).then(s => s);
+    } else {
+      txSig = `sim_tx_${Date.now()}`;
+    }
 
     pnlLogger.logInfo(`🔗 Flashloan executed successfully: ${txSig}`);
 
@@ -123,13 +122,11 @@ export async function executeFlashloanArbitrage(signal: ArbitrageSignal): Promis
   }
 }
 
-// Batch support
 export async function executeBatch(signals: ArbitrageSignal[]): Promise<TradeLog[]> {
   const trades: TradeLog[] = [];
   for (const signal of signals) {
     const trade = await executeFlashloanArbitrage(signal);
     if (trade) trades.push(trade);
-    // Jitter delay
     await new Promise(resolve => setTimeout(resolve, 1000 + Math.random() * 2000));
   }
   return trades;
