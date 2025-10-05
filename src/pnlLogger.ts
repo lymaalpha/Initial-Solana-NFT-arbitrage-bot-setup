@@ -1,21 +1,22 @@
+// pnlLogger.ts
 export class PnLLogger {
-  // ...existing properties and constructor
-
-  logInfo(message: string, meta?: any) {
-    this.logger.info(message, meta);
+  logPnL(signal: any, txSig?: string, status?: string) {
+    console.log(`[PnL] ${status || 'unknown'} | Mint: ${signal?.targetListing?.mint} | Tx: ${txSig || '-'}`);
   }
 
-  logWarn(message: string, meta?: any) {
-    this.logger.warn(message, meta);
+  logMetrics(metrics: any) {
+    console.log('[Metrics]', metrics);
   }
 
-  logError(message: string | Error, meta?: any) {
-    if (message instanceof Error) {
-      this.logger.error('Bot Error', { message: message.message, stack: message.stack, ...meta });
-    } else {
-      this.logger.error(message, meta);
-    }
+  logError(err: any, context?: any) {
+    console.error('[Error]', err, context || {});
   }
 
-  // ...rest of existing methods
+  close() {
+    console.log('[Logger] Closing logs');
+  }
 }
+
+// Singleton instance
+export const pnlLogger = new PnLLogger();
+export default pnlLogger;
