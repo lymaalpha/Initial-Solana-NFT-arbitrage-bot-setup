@@ -15,6 +15,7 @@ export interface BotConfig {
   logLevel: string;
   enableCsvLogging: boolean;
   enableJsonLogging: boolean;
+  simulateOnly: boolean; // ✅ Added
   heliusApiKey?: string;
   magicEdenApiKey?: string;
   telegramBotToken?: string;
@@ -28,6 +29,11 @@ function parseNumber(value: string | undefined, defaultValue: number, name: stri
     throw new Error(`Invalid ${name}: must be a positive number (got ${value})`);
   }
   return num;
+}
+
+function parseBoolean(value: string | undefined, defaultValue: boolean): boolean {
+  if (value === undefined) return defaultValue;
+  return value.toLowerCase() === 'true';
 }
 
 function validateConfig(): BotConfig {
@@ -46,6 +52,8 @@ function validateConfig(): BotConfig {
     throw new Error('MIN_SIGNALS must be a positive integer');
   }
 
+  const simulateOnly = parseBoolean(process.env.SIMULATE_ONLY, true); // ✅ New
+
   console.log('Config loaded successfully'); // Debug log for Render
 
   return {
@@ -59,6 +67,7 @@ function validateConfig(): BotConfig {
     logLevel: process.env.LOG_LEVEL || 'info',
     enableCsvLogging: process.env.ENABLE_CSV_LOGGING === 'true',
     enableJsonLogging: process.env.ENABLE_JSON_LOGGING !== 'false',
+    simulateOnly, // ✅ Added
     heliusApiKey: process.env.HELIUS_API_KEY,
     magicEdenApiKey: process.env.MAGIC_EDEN_API_KEY,
     telegramBotToken: process.env.TELEGRAM_BOT_TOKEN,
