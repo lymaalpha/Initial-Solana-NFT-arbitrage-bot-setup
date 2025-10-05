@@ -1,8 +1,9 @@
+main.ts
 import { Connection, Keypair } from "@solana/web3.js";
-import { scanForArbitrage } from "./bot/scanForArbitrage";
-import { NFTListing, NFTBid, ArbitrageSignal } from "./bot/types";
-import { pnlLogger } from "./utils/pnlLogger";
-import { config } from "./config";
+import { scanForArbitrage } from "./scanForArbitrage"; // Corrected path
+import { NFTListing, NFTBid, ArbitrageSignal } from "./types"; // Corrected path
+import { pnlLogger } from "./pnlLogger"; // Corrected path
+import { config } from "./config"; // Corrected path
 import axios from 'axios';
 import BN from 'bn.js';
 
@@ -157,8 +158,8 @@ async function main() {
     
     // Load wallet from private key
     const payer = Keypair.fromSecretKey(
-      Uint8Array.from(Buffer.from(config.walletPrivateKey, 'base58'))
-    );
+      Uint8Array.from(Buffer.from(config.walletPrivateKey, 'base58') as Buffer)
+    ); // Added 'as Buffer' type assertion
     
     console.log(`💼 Wallet: ${payer.publicKey.toString()}`);
     
