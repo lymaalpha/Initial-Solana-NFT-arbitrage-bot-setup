@@ -15,7 +15,7 @@ export interface BotConfig {
   logLevel: string;
   enableCsvLogging: boolean;
   enableJsonLogging: boolean;
-  simulateOnly: boolean; // ✅ Added
+  simulateOnly: boolean;          // ✅ Added
   heliusApiKey?: string;
   magicEdenApiKey?: string;
   telegramBotToken?: string;
@@ -31,15 +31,9 @@ function parseNumber(value: string | undefined, defaultValue: number, name: stri
   return num;
 }
 
-function parseBoolean(value: string | undefined, defaultValue: boolean): boolean {
-  if (value === undefined) return defaultValue;
-  return value.toLowerCase() === 'true';
-}
-
 function validateConfig(): BotConfig {
   const requiredVars = ['RPC_URL', 'PRIVATE_KEY', 'COLLECTION_MINT'];
   const missing = requiredVars.filter(varName => !process.env[varName]);
-  
   if (missing.length > 0) {
     throw new Error(`Missing required environment variables: ${missing.join(', ')}`);
   }
@@ -48,11 +42,9 @@ function validateConfig(): BotConfig {
   const feeBufferSOL = parseNumber(process.env.FEE_BUFFER_SOL, 0.02, 'FEE_BUFFER_SOL');
   const scanIntervalMs = parseNumber(process.env.SCAN_INTERVAL_MS, 5000, 'SCAN_INTERVAL_MS');
   const minSignals = parseInt(process.env.MIN_SIGNALS || '1', 10);
-  if (isNaN(minSignals) || minSignals < 1) {
-    throw new Error('MIN_SIGNALS must be a positive integer');
-  }
+  if (isNaN(minSignals) || minSignals < 1) throw new Error('MIN_SIGNALS must be a positive integer');
 
-  const simulateOnly = parseBoolean(process.env.SIMULATE_ONLY, true); // ✅ New
+  const simulateOnly = process.env.SIMULATE_ONLY === 'true'; // ✅
 
   console.log('Config loaded successfully'); // Debug log for Render
 
@@ -60,14 +52,14 @@ function validateConfig(): BotConfig {
     rpcUrl: process.env.RPC_URL!,
     walletPrivateKey: process.env.PRIVATE_KEY!,
     collectionMint: process.env.COLLECTION_MINT!,
-    scanIntervalMs: scanIntervalMs,
-    minSignals: minSignals,
-    minProfitLamports: new BN(minProfitSOL * 1e9), // Convert SOL to lamports
+    scanIntervalMs,
+    minSignals,
+    minProfitLamports: new BN(minProfitSOL * 1e9),
     feeBufferLamports: new BN(feeBufferSOL * 1e9),
     logLevel: process.env.LOG_LEVEL || 'info',
     enableCsvLogging: process.env.ENABLE_CSV_LOGGING === 'true',
     enableJsonLogging: process.env.ENABLE_JSON_LOGGING !== 'false',
-    simulateOnly, // ✅ Added
+    simulateOnly, // ✅
     heliusApiKey: process.env.HELIUS_API_KEY,
     magicEdenApiKey: process.env.MAGIC_EDEN_API_KEY,
     telegramBotToken: process.env.TELEGRAM_BOT_TOKEN,
@@ -77,5 +69,4 @@ function validateConfig(): BotConfig {
 }
 
 export const config = validateConfig();
-
 export default config;
