@@ -1,123 +1,141 @@
-import { Connection, Keypair, PublicKey, Transaction, sendAndConfirmTransaction } from "@solana/web3.js";
-import { SolendMarket } from "@solendprotocol/solend-sdk";  // Updated import
-import { ArbitrageSignal, TradeLog } from "./types";
-import { buildExecuteSaleTransaction } from "./marketplaceInstructions";
-import { pnlLogger } from "./pnlLogger";
-import { config } from "./config";
+import { createObjectCsvWriter } from 'csv-writer';
+import winston from 'winston';
+import fs from 'fs';
+import path from 'path';
 import BN from 'bn.js';
-import bs58 from 'bs58';
+import { ArbitrageSignal } from './types';
 
-const connection = new Connection(config.rpcUrl, "confirmed");
-const payer = Keypair.fromSecretKey(bs58.decode(config.walletPrivateKey));
-
-const FLASHLOAN_RESERVE = new PublicKey("So11111111111111111111111111111111111111112");
-
-async function executeMarketplaceArbitrage(signal: ArbitrageSignal): Promise<{ buySig?: string; sellSig?: string }> {
-  const arbTx = await buildExecuteSaleTransaction({
-    connection,
-    payerKeypair: payer,
-    listing: {
-      mint: signal.targetListing.mint,
-      price: signal.targetListing.price,
-      auctionHouse: signal.targetListing.auctionHouse,
-      sellerPubkey: signal.targetListing.sellerPubkey,
-      tokenAccount: signal.targetListing.tokenAccount,
-    },
-    bid: {
-      mint: signal.targetBid.mint,
-      price: signal.targetBid.price,
-      auctionHouse: signal.targetBid.auctionHouse,
-      bidderPubkey: signal.targetBid.bidderPubkey,
-      tokenAccount: signal.targetBid.tokenAccount,
-    },
-  });
-
-  const simResult = await connection.simulateTransaction(arbTx);
-  if (simResult.value.err) {
-    throw new Error(`Simulation failed: ${simResult.value.err}`);
-  }
-
-  let txSig: string | undefined;
-  if (!config.simulateOnly) {
-    txSig = await sendAndConfirmTransaction(connection, arbTx, [payer], { commitment: 'confirmed', maxRetries: 3 });
-  } else {
-    txSig = `sim_tx_${Date.now()}`;
-  }
-
-  pnlLogger.logInfo(`✅ Marketplace arb executed: ${txSig}`);
-  return { buySig: txSig, sellSig: txSig };
+export interface TradeLog {
+  timestamp: number;
+  mint: string;
+  buyPrice: BN;
+  sellPrice: BN;
+  netProfit: BN;
+  currency: string;
+  txSig?: string;
+  type: 'signal' | 'executed' | 'failed';
+  executorType?: 'direct' | 'flash_loan';
+  notes?: string;
 }
 
-export async function executeFlashloanArbitrage(signal: ArbitrageSignal): Promise<TradeLog | null> {
-  try {
-    pnlLogger.logInfo(`⚡ Executing flashloan arbitrage for ${signal.targetListing.mint}`);
+interface PnLLoggerOptions {
+  logLevel?: 'info' | 'warn' | 'error';
+  outputFile?: string;
+  enableJson?: boolean;
+  enableCsv?: boolean;
+}
 
-    // Initialize SolendMarket
-    const market = await SolendMarket.initialize({
-      connection,
-      cluster: "devnet",
+export class PnLLogger {
+  private logger: winston.Logger;
+  private csvWriter?: any;
+  private logFile: string;
+  private totalProfit: BN = new BN(0);
+  private tradeCount = 0;
+
+  constructor(options: PnLLoggerOptions = {}) {
+    const { 
+      logLevel = 'info', 
+      outputFile = 'logs/arb_pnl.csv', 
+      enableJson = true,
+      enableCsv = true 
+    } = options;
+    
+    this.logFile = outputFile;
+
+    const logDir = path.dirname(outputFile);
+    if (!fs.existsSync(logDir)) fs.mkdirSync(logDir, { recursive: true });
+
+    this.logger = winston.createLogger({
+      level: logLevel,
+      format: winston.format.combine(
+        winston.format.timestamp(),
+        winston.format.errors({ stack: true }),
+        winston.format.json()
+      ),
+      transports: [
+        new winston.transports.Console({
+          format: winston.format.combine(
+            winston.format.colorize(),
+            winston.format.simple()
+          )
+        }),
+        ...(enableJson ? [new winston.transports.File({ filename: 'logs/bot.log' })] : [])
+      ],
     });
 
-    const borrowAmountLamports = signal.targetListing.price.add(config.feeBufferLamports);
-    const borrowAmountSOL = borrowAmountLamports.toNumber() / 1e9;
-    pnlLogger.logInfo(`💰 Borrowing ${borrowAmountSOL.toFixed(3)} SOL from Solend...`);
+    if (enableCsv) this.initCsvWriter();
+  }
 
-    // Execute flashloan
-    await market.flashLoan({
-      amount: borrowAmountSOL,
-      reserve: FLASHLOAN_RESERVE,
-      receiver: payer.publicKey,
-      callback: async () => {
-        const { buySig, sellSig } = await executeMarketplaceArbitrage(signal);
-        pnlLogger.logInfo(`✅ Buy TX: ${buySig} | Sell TX: ${sellSig}`);
-      },
-    });
+  private initCsvWriter() {
+    try {
+      this.csvWriter = createObjectCsvWriter({
+        path: this.logFile,
+        header: [
+          { id: 'timestamp', title: 'Timestamp' },
+          { id: 'mint', title: 'NFT Mint' },
+          { id: 'buyPrice', title: 'Buy Price (SOL)' },
+          { id: 'sellPrice', title: 'Sell Price (SOL)' },
+          { id: 'netProfit', title: 'Net Profit (SOL)' },
+          { id: 'currency', title: 'Currency' },
+          { id: 'txSig', title: 'Transaction Signature' },
+          { id: 'type', title: 'Type' },
+          { id: 'executorType', title: 'Executor Type' },
+          { id: 'notes', title: 'Notes' }
+        ],
+        append: fs.existsSync(this.logFile)
+      });
+    } catch (err: any) {
+      this.logger.error('CSV init failed', { error: err?.message || err });
+    }
+  }
 
-    const netProfit = signal.estimatedNetProfit || new BN(0);
-    const tradeLog: TradeLog = {
-      timestamp: Date.now(),
-      mint: signal.targetListing.mint,
-      buyPrice: signal.targetListing.price,
-      sellPrice: signal.targetBid.price,
-      netProfit,
-      currency: signal.targetListing.currency,
-      txSig: `flashloan_tx_${Date.now()}`,
-      type: 'executed',
-      notes: `Confidence: ${signal.confidence || 0.5}`,
-      executorType: 'flash_loan',
+  logInfo(message: string, meta?: any) {
+    this.logger.info(message, meta);
+  }
+
+  async logTrade(trade: TradeLog) {
+    const logData = {
+      timestamp: trade.timestamp,
+      mint: trade.mint,
+      buyPrice: trade.buyPrice.toNumber() / 1e9,
+      sellPrice: trade.sellPrice.toNumber() / 1e9,
+      netProfit: trade.netProfit.toNumber() / 1e9,
+      currency: trade.currency,
+      txSig: trade.txSig,
+      type: trade.type,
+      executorType: trade.executorType,
+      notes: trade.notes
     };
 
-    await pnlLogger.logTrade(tradeLog);
-    return tradeLog;
-  } catch (err: any) {
-    const errorMsg = err.message || 'Unknown error';
-    pnlLogger.logError(err, { mint: signal.targetListing.mint });
+    if (trade.type === 'executed') {
+      this.totalProfit = this.totalProfit.add(trade.netProfit);
+      this.tradeCount++;
+    }
 
-    const tradeLog: TradeLog = {
-      timestamp: Date.now(),
-      mint: signal.targetListing.mint,
-      buyPrice: signal.targetListing.price,
-      sellPrice: signal.targetBid.price,
-      netProfit: new BN(0),
-      currency: signal.targetListing.currency,
-      txSig: undefined,
-      type: 'failed',
-      notes: `Error: ${errorMsg}`,
-      executorType: 'flash_loan',
-    };
+    const logLevel = trade.type === 'failed' ? 'error' : 'info';
+    this.logger[logLevel]('Trade Executed', logData);
 
-    await pnlLogger.logTrade(tradeLog);
-    return null;
+    if (this.csvWriter) {
+      await this.csvWriter.writeRecords([logData])
+        .catch((err: Error) => this.logger.error('CSV write failed', { error: err.message }));
+    }
+  }
+
+  async logError(error: Error, context?: any) {
+    this.logger.error('Bot Error', { message: error.message, stack: error.stack, context });
+  }
+
+  close() {
+    this.logger.info('Logger shutting down');
   }
 }
 
-export async function executeBatch(signals: ArbitrageSignal[]): Promise<TradeLog[]> {
-  const trades: TradeLog[] = [];
-  for (const signal of signals) {
-    const trade = await executeFlashloanArbitrage(signal);
-    if (trade) trades.push(trade);
-    await new Promise(resolve => setTimeout(resolve, 1000 + Math.random() * 2000));
-  }
-  return trades;
-}
+export const pnlLogger = new PnLLogger({
+  enableCsv: process.env.ENABLE_CSV_LOGGING === 'true',
+  enableJson: process.env.ENABLE_JSON_LOGGING !== 'false'
+});
 
+process.on('SIGINT', () => {
+  pnlLogger.close();
+  process.exit(0);
+});
