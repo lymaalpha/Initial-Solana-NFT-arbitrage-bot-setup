@@ -45,7 +45,7 @@ async function fetchListings(collectionMint: string) {
     return resp.data.map((item: any) => ({
       mint: item.mint,
       auctionHouse: 'Helius',
-      price: new BN(item.price * 1e9 || 0),
+      price: new BN((item.price || 0) * 1e9),
       assetMint: item.mint,
       currency: 'SOL',
       timestamp: Date.now(),
