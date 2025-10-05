@@ -1,4 +1,3 @@
-// main.ts
 import { Connection, Keypair } from '@solana/web3.js';
 import BN from 'bn.js';
 import bs58 from 'bs58';
@@ -10,8 +9,9 @@ import { config } from './config';
 // Tensor SDK
 import { getBidsByCollection } from '@tensor-oss/tensorswap-sdk';
 
-// Helius
+// Helius API
 import axios from 'axios';
+import { NFTListing } from './types';
 
 const connection = new Connection(config.rpcUrl, 'confirmed');
 const payer = Keypair.fromSecretKey(bs58.decode(config.walletPrivateKey));
@@ -37,19 +37,20 @@ async function updateTradeResult(mint: string, result: any): Promise<void> {
 }
 
 // Fetch listings using Helius NFT API
-async function fetchListings(collectionMint: string) {
+async function fetchListings(collectionMint: string): Promise<NFTListing[]> {
   try {
-    const resp = await axios.get(
-      `https://api.helius.xyz/v0/addresses/${collectionMint}/nfts?api-key=${config.heliusApiKey}&limit=50`
-    );
+    const url = `https://api.helius.xyz/v0/collections/${collectionMint}/listings?api-key=${config.heliusApiKey}&limit=50`;
+    const resp = await axios.get(url);
+    const now = Date.now();
 
     return resp.data.map((item: any) => ({
-      mint: item.mint,
+      mint: item.tokenMint,
       auctionHouse: 'Helius',
-      price: new BN((item.price || 0) * 1e9),
-      assetMint: item.mint,
+      price: new BN(item.price * 1e9 || 0),
+      assetMint: item.tokenMint,
       currency: 'SOL',
-      timestamp: Date.now(),
+      timestamp: now,
+      sellerPubkey: item.seller,
     }));
   } catch (err) {
     pnlLogger.logError(err as Error, { collectionMint });
