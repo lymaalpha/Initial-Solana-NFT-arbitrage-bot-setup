@@ -1,11 +1,15 @@
 import { Connection, Keypair } from '@solana/web3.js';
+import BN from 'bn.js';
+import bs58 from 'bs58';
 import { scanForArbitrage } from './scanForArbitrage';
 import { executeBatch } from './autoFlashloanExecutor';
 import { pnlLogger } from './pnlLogger';
 import { config } from './config';
-import BN from 'bn.js';
-import bs58 from 'bs58';
-import { NFTListing, NFTBid } from './types';
+
+// Tensor SDK
+import { getBidsByCollection } from '@tensor-oss/tensorswap-sdk';
+
+// Helius
 import axios from 'axios';
 
 const connection = new Connection(config.rpcUrl, 'confirmed');
@@ -21,27 +25,59 @@ interface BotStats {
 }
 const botStats: BotStats = { totalProfit: 0, totalTrades: 0, lastScan: 0 };
 
-// Load collection mint
+// Load active collections
 async function loadActiveOpportunities(): Promise<string[]> {
   return [config.collectionMint];
 }
 
-// Fetch bids from Tensor using Helius
-async function fetchBids(collectionMint: string): Promise<NFTBid[]> {
-  const url = `https://api.helius.xyz/v0/collections/${collectionMint}/bids?api-key=${config.heliusApiKey}`;
-  const resp = await axios.get(url);
-  return resp.data.map((item: any) => ({
-    mint: item.mint,
-    auctionHouse: 'Tensor',
-    price: new BN(item.price * 1e9),
-    currency: 'SOL',
-    timestamp: Date.now(),
-    bidderPubkey: item.bidder,
-  }));
+// Update trade results
+async function updateTradeResult(mint: string, result: any): Promise<void> {
+  pnlLogger.logMetrics({ updatedMint: mint, result });
 }
 
+// Fetch listings using Helius NFT API
+async function fetchListings(collectionMint: string) {
+  try {
+    const resp = await axios.get(
+      `https://api.helius.xyz/v0/addresses/${collectionMint}/nfts?api-key=${config.heliusApiKey}&limit=50`
+    );
+
+    return resp.data.map((item: any) => ({
+      mint: item.mint,
+      auctionHouse: 'Helius',
+      price: new BN(item.price * 1e9 || 0),
+      assetMint: item.mint,
+      currency: 'SOL',
+      timestamp: Date.now(),
+    }));
+  } catch (err) {
+    pnlLogger.logError(err as Error, { collectionMint });
+    return [];
+  }
+}
+
+// Fetch bids using Tensor SDK
+async function fetchBids(collectionMint: string) {
+  try {
+    const bidsRaw = await getBidsByCollection(collectionMint, { limit: 50 });
+    return bidsRaw.map((b: any) => ({
+      mint: b.mint,
+      auctionHouse: 'Tensor',
+      price: new BN(b.price * 1e9),
+      assetMint: b.mint,
+      currency: 'SOL',
+      timestamp: Date.now(),
+      bidderPubkey: b.buyer,
+    }));
+  } catch (err) {
+    pnlLogger.logError(err as Error, { collectionMint });
+    return [];
+  }
+}
+
+// Main bot loop
 async function runBot() {
-  pnlLogger.logMetrics({ message: '🚀 NFT Arbitrage Bot starting...' });
+  pnlLogger.logMetrics({ message: '🚀 Flashloan Arbitrage Bot starting...' });
 
   while (true) {
     const startTime = Date.now();
@@ -50,21 +86,19 @@ async function runBot() {
       let signals: any[] = [];
 
       for (const collectionMint of opportunities) {
+        const listings = await fetchListings(collectionMint);
         const bids = await fetchBids(collectionMint);
-        const listings: NFTListing[] = bids.map(b => ({
-          mint: b.mint,
-          auctionHouse: 'Tensor',
-          price: b.price,
-          currency: 'SOL',
-          timestamp: b.timestamp,
-        }));
 
-        const cycleSignals = await scanForArbitrage(listings, bids);
+        const cycleSignals = await scanForArbitrage(listings, bids, {
+          minProfit: config.minProfitLamports,
+          feeAdjustment: config.feeBufferLamports,
+        });
+
         signals = signals.concat(cycleSignals);
       }
 
       const topSignals = signals
-        .filter(s => s.estimatedNetProfit.gt(new BN(0)))
+        .filter((s) => s.estimatedNetProfit.gt(new BN(0)))
         .sort((a, b) => b.estimatedNetProfit.sub(a.estimatedNetProfit).toNumber())
         .slice(0, MAX_CONCURRENT_TRADES);
 
@@ -72,14 +106,13 @@ async function runBot() {
         pnlLogger.logMetrics({ message: `🚀 Executing top ${topSignals.length} signals...` });
         const trades = await executeBatch(topSignals);
 
-        trades.forEach(trade => {
+        trades.forEach((trade) => {
           if (trade) {
             botStats.totalTrades++;
             botStats.totalProfit += trade.netProfit.toNumber() / 1e9;
+            updateTradeResult(trade.mint, trade);
             pnlLogger.logMetrics({
-              message: `💰 Trade complete | +${trade.netProfit.toNumber() / 1e9} SOL | Total: ${botStats.totalProfit.toFixed(
-                3
-              )} SOL`,
+              message: `💰 Trade complete | +${trade.netProfit.toNumber() / 1e9} SOL | Total: ${botStats.totalProfit.toFixed(3)} SOL`,
               trade,
             });
           }
@@ -100,10 +133,11 @@ async function runBot() {
       pnlLogger.logError(err, { cycle: 'main loop' });
     }
 
-    await new Promise(resolve => setTimeout(resolve, SCAN_INTERVAL_MS));
+    await new Promise((resolve) => setTimeout(resolve, SCAN_INTERVAL_MS));
   }
 }
 
+// Graceful shutdown
 process.on('SIGINT', () => {
   pnlLogger.logMetrics({
     message: `Shutting down | ${botStats.totalTrades} trades, ${botStats.totalProfit.toFixed(3)} SOL profit`,
@@ -113,7 +147,7 @@ process.on('SIGINT', () => {
   process.exit(0);
 });
 
-runBot().catch(err => {
+runBot().catch((err) => {
   pnlLogger.logError(err);
   process.exit(1);
 });
