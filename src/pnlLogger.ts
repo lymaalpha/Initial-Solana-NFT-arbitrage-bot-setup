@@ -1,8 +1,23 @@
 import { createObjectCsvWriter } from 'csv-writer';
 import winston from 'winston';
 import fs from 'fs';
+import path from 'path';
 import BN from 'bn.js';
-import { ArbitrageSignal, TradeLog } from '../bot/types';
+import { ArbitrageSignal } from './types';  // Fixed: Flat src/ path
+
+// Stub TradeLog if not in types.ts (add to types.ts for full)
+export interface TradeLog {
+  timestamp: number;
+  mint: string;
+  buyPrice: BN;
+  sellPrice: BN;
+  netProfit: BN;
+  currency: string;
+  txSig?: string;
+  type: 'signal' | 'executed' | 'failed';
+  executorType?: string;
+  notes?: string;
+}
 
 interface PnLLoggerOptions {
   logLevel?: 'info' | 'warn' | 'error';
@@ -27,6 +42,12 @@ export class PnLLogger {
     } = options;
     
     this.logFile = outputFile;
+
+    // Ensure log dir exists
+    const logDir = path.dirname(outputFile);
+    if (!fs.existsSync(logDir)) {
+      fs.mkdirSync(logDir, { recursive: true });
+    }
 
     // Winston logger setup
     this.logger = winston.createLogger({
@@ -54,22 +75,26 @@ export class PnLLogger {
   }
 
   private initCsvWriter() {
-    this.csvWriter = createObjectCsvWriter({
-      path: this.logFile,
-      header: [
-        { id: 'timestamp', title: 'Timestamp' },
-        { id: 'mint', title: 'NFT Mint' },
-        { id: 'buyPrice', title: 'Buy Price (SOL)' },
-        { id: 'sellPrice', title: 'Sell Price (SOL)' },
-        { id: 'netProfit', title: 'Net Profit (SOL)' },
-        { id: 'currency', title: 'Currency' },
-        { id: 'txSig', title: 'Transaction Signature' },
-        { id: 'type', title: 'Type' },
-        { id: 'executorType', title: 'Executor Type' },
-        { id: 'notes', title: 'Notes' }
-      ],
-      append: fs.existsSync(this.logFile)
-    });
+    try {
+      this.csvWriter = createObjectCsvWriter({
+        path: this.logFile,
+        header: [
+          { id: 'timestamp', title: 'Timestamp' },
+          { id: 'mint', title: 'NFT Mint' },
+          { id: 'buyPrice', title: 'Buy Price (SOL)' },
+          { id: 'sellPrice', title: 'Sell Price (SOL)' },
+          { id: 'netProfit', title: 'Net Profit (SOL)' },
+          { id: 'currency', title: 'Currency' },
+          { id: 'txSig', title: 'Transaction Signature' },
+          { id: 'type', title: 'Type' },
+          { id: 'executorType', title: 'Executor Type' },
+          { id: 'notes', title: 'Notes' }
+        ],
+        append: fs.existsSync(this.logFile)
+      });
+    } catch (err) {
+      this.logger.error('CSV init failed', { error: err.message });
+    }
   }
 
   async logSignal(signal: ArbitrageSignal, notes?: string) {
@@ -78,17 +103,17 @@ export class PnLLogger {
       mint: signal.targetListing.mint,
       buyPrice: signal.targetListing.price.toNumber() / 1e9,
       sellPrice: signal.targetBid.price.toNumber() / 1e9,
-      netProfit: signal.estimatedNetProfit.toNumber() / 1e9,
+      netProfit: signal.estimatedNetProfit?.toNumber() / 1e9 || 0,
       currency: signal.targetListing.currency,
-      type: 'signal',
+      type: 'signal' as const,
       executorType: 'pending',
-      notes: notes || `Confidence: ${signal.confidence}`
+      notes: notes || `Confidence: ${signal.confidence || 'N/A'}`
     };
 
     this.logger.info('Arbitrage Signal Detected', logData);
     
     if (this.csvWriter) {
-      await this.csvWriter.writeRecords([logData]);
+      await this.csvWriter.writeRecords([logData]).catch(err => this.logger.error('CSV write failed', { error: err.message }));
     }
   }
 
@@ -116,7 +141,7 @@ export class PnLLogger {
     this.logger[logLevel]('Trade Executed', logData);
 
     if (this.csvWriter) {
-      await this.csvWriter.writeRecords([logData]);
+      await this.csvWriter.writeRecords([logData]).catch(err => this.logger.error('CSV write failed', { error: err.message }));
     }
 
     // Log milestone achievements
@@ -155,6 +180,13 @@ export class PnLLogger {
     return this.tradeCount;
   }
 
+  close() {
+    if (this.csvWriter) {
+      // CSV doesn't have explicit close, but flush if needed
+      this.logger.info('Logger shutting down');
+    }
+  }
+
   // Legacy method for backward compatibility
   logPnL(signal: ArbitrageSignal, txSig?: string, type: 'signal' | 'executed' | 'failed' = 'signal') {
     if (type === 'signal') {
@@ -165,12 +197,12 @@ export class PnLLogger {
         mint: signal.targetListing.mint,
         buyPrice: signal.targetListing.price,
         sellPrice: signal.targetBid.price,
-        netProfit: signal.estimatedNetProfit,
+        netProfit: signal.estimatedNetProfit || new BN(0),
         currency: signal.targetListing.currency,
         txSig,
         type,
         executorType: 'flash_loan',
-        notes: `Raw profit: ${signal.rawProfit.toNumber() / 1e9} SOL`
+        notes: `Raw profit: ${signal.rawProfit?.toNumber() / 1e9 || 0} SOL`
       };
       this.logTrade(trade);
     }
@@ -181,4 +213,10 @@ export class PnLLogger {
 export const pnlLogger = new PnLLogger({
   enableCsv: process.env.ENABLE_CSV_LOGGING === 'true',
   enableJson: process.env.ENABLE_JSON_LOGGING !== 'false'
+});
+
+// Graceful shutdown
+process.on('SIGINT', () => {
+  pnlLogger.close();
+  process.exit(0);
 });
