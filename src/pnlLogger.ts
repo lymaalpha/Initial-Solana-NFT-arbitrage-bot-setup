@@ -3,9 +3,9 @@ import winston from 'winston';
 import fs from 'fs';
 import path from 'path';
 import BN from 'bn.js';
-import { ArbitrageSignal } from './types';  // Fixed: Flat src/ path
+import { ArbitrageSignal } from './types';
 
-// Stub TradeLog if not in types.ts (add to types.ts for full)
+// Stub TradeLog if not in types.ts
 export interface TradeLog {
   timestamp: number;
   mint: string;
@@ -31,12 +31,12 @@ export class PnLLogger {
   private csvWriter?: any;
   private logFile: string;
   private totalProfit: BN = new BN(0);
-  private tradeCount: number = 0;
+  private tradeCount = 0;
 
   constructor(options: PnLLoggerOptions = {}) {
     const { 
       logLevel = 'info', 
-      outputFile = 'arb_pnl.csv', 
+      outputFile = 'logs/arb_pnl.csv', 
       enableJson = true,
       enableCsv = true 
     } = options;
@@ -45,9 +45,7 @@ export class PnLLogger {
 
     // Ensure log dir exists
     const logDir = path.dirname(outputFile);
-    if (!fs.existsSync(logDir)) {
-      fs.mkdirSync(logDir, { recursive: true });
-    }
+    if (!fs.existsSync(logDir)) fs.mkdirSync(logDir, { recursive: true });
 
     // Winston logger setup
     this.logger = winston.createLogger({
@@ -64,14 +62,12 @@ export class PnLLogger {
             winston.format.simple()
           )
         }),
-        ...(enableJson ? [new winston.transports.File({ filename: 'bot.log' })] : [])
+        ...(enableJson ? [new winston.transports.File({ filename: 'logs/bot.log' })] : [])
       ],
     });
 
     // CSV writer setup
-    if (enableCsv) {
-      this.initCsvWriter();
-    }
+    if (enableCsv) this.initCsvWriter();
   }
 
   private initCsvWriter() {
@@ -92,8 +88,8 @@ export class PnLLogger {
         ],
         append: fs.existsSync(this.logFile)
       });
-    } catch (err) {
-      this.logger.error('CSV init failed', { error: err.message });
+    } catch (err: any) {
+      this.logger.error('CSV init failed', { error: err?.message || err });
     }
   }
 
@@ -111,9 +107,10 @@ export class PnLLogger {
     };
 
     this.logger.info('Arbitrage Signal Detected', logData);
-    
+
     if (this.csvWriter) {
-      await this.csvWriter.writeRecords([logData]).catch(err => this.logger.error('CSV write failed', { error: err.message }));
+      await this.csvWriter.writeRecords([logData])
+        .catch((err: Error) => this.logger.error('CSV write failed', { error: err.message }));
     }
   }
 
@@ -141,17 +138,16 @@ export class PnLLogger {
     this.logger[logLevel]('Trade Executed', logData);
 
     if (this.csvWriter) {
-      await this.csvWriter.writeRecords([logData]).catch(err => this.logger.error('CSV write failed', { error: err.message }));
+      await this.csvWriter.writeRecords([logData])
+        .catch((err: Error) => this.logger.error('CSV write failed', { error: err.message }));
     }
 
     // Log milestone achievements
-    if (trade.type === 'executed' && this.tradeCount % 10 === 0) {
-      this.logMilestone();
-    }
+    if (trade.type === 'executed' && this.tradeCount % 10 === 0) this.logMilestone();
   }
 
   private logMilestone() {
-    const avgProfit = this.totalProfit.div(new BN(this.tradeCount));
+    const avgProfit = this.tradeCount > 0 ? this.totalProfit.div(new BN(this.tradeCount)) : new BN(0);
     this.logger.info('Milestone Reached', {
       totalTrades: this.tradeCount,
       totalProfit: this.totalProfit.toNumber() / 1e9,
@@ -181,16 +177,14 @@ export class PnLLogger {
   }
 
   close() {
-    if (this.csvWriter) {
-      // CSV doesn't have explicit close, but flush if needed
-      this.logger.info('Logger shutting down');
-    }
+    this.logger.info('Logger shutting down');
   }
 
-  // Legacy method for backward compatibility
   logPnL(signal: ArbitrageSignal, txSig?: string, type: 'signal' | 'executed' | 'failed' = 'signal') {
     if (type === 'signal') {
-      this.logSignal(signal);
+      this.logSignal(signal).catch((err: Error) =>
+        this.logger.error('Signal logging failed', { error: err.message })
+      );
     } else {
       const trade: TradeLog = {
         timestamp: Date.now(),
@@ -204,12 +198,14 @@ export class PnLLogger {
         executorType: 'flash_loan',
         notes: `Raw profit: ${signal.rawProfit?.toNumber() / 1e9 || 0} SOL`
       };
-      this.logTrade(trade);
+      this.logTrade(trade).catch((err: Error) =>
+        this.logger.error('Trade logging failed', { error: err.message })
+      );
     }
   }
 }
 
-// Export singleton instance
+// Singleton export
 export const pnlLogger = new PnLLogger({
   enableCsv: process.env.ENABLE_CSV_LOGGING === 'true',
   enableJson: process.env.ENABLE_JSON_LOGGING !== 'false'
