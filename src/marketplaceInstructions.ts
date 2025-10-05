@@ -1,3 +1,4 @@
+// marketplaceInstructions.ts
 import { Connection, Keypair, PublicKey, Transaction, TransactionInstruction } from '@solana/web3.js';
 import { Metaplex, keypairIdentity } from '@metaplex-foundation/js';
 import { NFTListing, NFTBid } from './types';
@@ -5,6 +6,9 @@ import { NFTListing, NFTBid } from './types';
 export type ListingLike = Partial<NFTListing>;
 export type BidLike = Partial<NFTBid>;
 
+/**
+ * Builds a Transaction to execute a sale via Auction House
+ */
 export async function buildExecuteSaleTransaction(params: {
   connection: Connection;
   payerKeypair: Keypair;
@@ -12,41 +16,56 @@ export async function buildExecuteSaleTransaction(params: {
   bid: BidLike;
 }): Promise<Transaction> {
   const { connection, payerKeypair, listing, bid } = params;
-  const metaplex = Metaplex.make(connection).use(keypairIdentity(payerKeypair));
-  const auctionHouseObj = await metaplex.auctionHouse().findByAddress({ address: new PublicKey(listing.auctionHouse!) });
 
-  // Compute trade states via SDK helper methods
+  const metaplex = Metaplex.make(connection).use(keypairIdentity(payerKeypair));
+
+  // Find Auction House object from address string
+  if (!listing.auctionHouse) throw new Error('Listing auctionHouse missing');
+  const auctionHouseObj = await metaplex.auctionHouse().findByAddress({
+    address: new PublicKey(listing.auctionHouse)
+  });
+
+  if (!listing.mint || !listing.price) throw new Error('Listing mint or price missing');
+
+  // Compute seller trade state
   const sellerTradeState = await metaplex.auctionHouse().findTradeState({
     auctionHouse: auctionHouseObj,
     wallet: payerKeypair.publicKey,
-    tokenMint: new PublicKey(listing.mint!),
+    tokenMint: new PublicKey(listing.mint),
     tokenSize: 1,
-    price: listing.price!
+    price: listing.price
   });
 
+  // Compute buyer trade state
+  const buyerWallet = bid.bidderPubkey ? new PublicKey(bid.bidderPubkey) : payerKeypair.publicKey;
   const buyerTradeState = await metaplex.auctionHouse().findTradeState({
     auctionHouse: auctionHouseObj,
-    wallet: new PublicKey(bid.bidderPubkey || payerKeypair.publicKey.toString()),
-    tokenMint: new PublicKey(listing.mint!),
+    wallet: buyerWallet,
+    tokenMint: new PublicKey(listing.mint),
     tokenSize: 1,
-    price: listing.price!
+    price: listing.price
   });
 
+  // Build the executeSale TransactionBuilder
   const txBuilder = await metaplex.auctionHouse().executeSale({
     auctionHouse: auctionHouseObj,
     sellerTradeState,
     buyerTradeState,
-    tokenMint: new PublicKey(listing.mint!),
-    price: listing.price!,
+    tokenMint: new PublicKey(listing.mint),
+    price: listing.price
   });
 
+  // Convert TransactionBuilder to Transaction
   const tx = new Transaction();
   for (const ix of txBuilder.getInstructions()) {
     tx.add(ix as TransactionInstruction);
   }
 
+  // Optional: simulate transaction before sending
   const simResult = await connection.simulateTransaction(tx);
-  if (simResult.value.err) throw new Error(`Simulation failed: ${simResult.value.err}`);
+  if (simResult.value.err) {
+    throw new Error(`Simulation failed: ${JSON.stringify(simResult.value.err)}`);
+  }
 
   return tx;
 }
