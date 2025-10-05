@@ -1,22 +1,26 @@
-// pnlLogger.ts
-export class PnLLogger {
-  logPnL(signal: any, txSig?: string, status?: string) {
-    console.log(`[PnL] ${status || 'unknown'} | Mint: ${signal?.targetListing?.mint} | Tx: ${txSig || '-'}`);
+import { ArbitrageSignal, TradeLog } from './types';
+
+class PnLLogger {
+  logMetrics(data: any) {
+    console.log('[METRICS]', JSON.stringify(data, null, 2));
   }
 
-  logMetrics(metrics: any) {
-    console.log('[Metrics]', metrics);
+  logError(err: Error, context?: any) {
+    console.error('[ERROR]', err.message, context || '');
   }
 
-  logError(err: any, context?: any) {
-    console.error('[Error]', err, context || {});
+  logPnL(signal: ArbitrageSignal, txSig?: string, type: 'executed' | 'failed' = 'executed') {
+    console.log(`[PnL] ${type.toUpperCase()}:`, {
+      mint: signal.targetListing.mint,
+      profit: signal.estimatedNetProfit.toNumber() / 1e9,
+      txSig,
+    });
   }
 
   close() {
-    console.log('[Logger] Closing logs');
+    console.log('[PnL] Logger closed');
   }
 }
 
-// Singleton instance
 export const pnlLogger = new PnLLogger();
 export default pnlLogger;
