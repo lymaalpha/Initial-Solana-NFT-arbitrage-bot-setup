@@ -1,14 +1,14 @@
 import { Connection, Keypair } from '@solana/web3.js';
 import { scanForArbitrage } from './scanForArbitrage';
-import { executeFlashloanTrade } from './autoFlashloanExecutor';  // Fixed name
+import { executeBatch } from './autoFlashloanExecutor';  // Fixed name and import
 import { pnlLogger } from './pnlLogger';
 import { config } from './config';
 import { ArbitrageSignal, TradeLog } from './types';  // Added TradeLog
 import BN from 'bn.js';
 import bs58 from 'bs58';
 
-import { fetchListings } from './heliusMarketplace';
-import { fetchBids } from './tensorMarketplace';
+import { fetchListings as fetchHeliusListings, fetchBids as fetchHeliusBids } from './heliusMarketplace'; // Assuming heliusMarketplace exists
+import { fetchListings as fetchTensorListings, fetchBids as fetchTensorBids } from './tensorMarketplace'; // Assuming tensorMarketplace exists
 
 const connection = new Connection(config.rpcUrl, 'confirmed');
 const payer = Keypair.fromSecretKey(bs58.decode(config.walletPrivateKey));
@@ -33,8 +33,16 @@ async function runBot() {
       let signals: ArbitrageSignal[] = [];
 
       for (const collectionMint of opportunities) {
-        const listings = await fetchListings(collectionMint);
-        const bids = await fetchBids(collectionMint);
+        // Fetch from Helius
+        const heliusListings = await fetchHeliusListings(collectionMint);
+        const heliusBids = await fetchHeliusBids(collectionMint);
+
+        // Fetch from Tensor
+        const tensorListings = await fetchTensorListings(collectionMint);
+        const tensorBids = await fetchTensorBids(collectionMint);
+
+        const listings = [...heliusListings, ...tensorListings];
+        const bids = [...heliusBids, ...tensorBids];
 
         const cycleSignals = await scanForArbitrage(listings, bids);  // Fixed: 2 args
 
