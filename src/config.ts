@@ -1,37 +1,28 @@
+// src/config.ts
 import dotenv from "dotenv";
-import BN from "bn.js";
 dotenv.config();
 
+function getEnvList(key: string): string[] {
+  const val = process.env[key];
+  return val ? val.split(",").map(v => v.trim().toUpperCase()).filter(Boolean) : [];
+}
+
 export const config = {
-  // 🔑 API Keys
+  rpcUrl: process.env.RPC_URL || "",
+  walletPrivateKey: process.env.PRIVATE_KEY || "",
   heliusApiKey: process.env.HELIUS_API_KEY || "",
   tensorApiKey: process.env.TENSOR_API_KEY || "",
-  rpcUrl: process.env.RPC_URL || "https://api.mainnet-beta.solana.com",
+  openseaApiKey: process.env.OPENSEA_API_KEY || "",
+  
+  COLLECTIONS: getEnvList("COLLECTION_MINTS"),
+  MARKETPLACES: getEnvList("MARKETPLACES"), // e.g. ["HELIUS", "TENSOR"]
 
-  // 🪙 Wallet for transaction signing
-  walletPrivateKey: process.env.WALLET_PRIVATE_KEY || "",
+  minProfitLamports: Math.floor(parseFloat(process.env.MIN_PROFIT_SOL || "0.01") * 1e9),
+  feeBufferLamports: Math.floor(parseFloat(process.env.FEE_BUFFER_SOL || "0.002") * 1e9),
+  scanIntervalMs: parseInt(process.env.SCAN_INTERVAL_MS || "10000", 10),
+  maxConcurrentTrades: parseInt(process.env.MAX_CONCURRENT_TRADES || "3", 10),
 
-  // 🧠 Collection mint addresses to scan
-  COLLECTIONS: [
-    "J1S9H3QjnRtBbbuD4HjPsRy5uXkTVMJbvXWB7R9X", // Mad Lads
-    "6XxjKYFbcndh2gDcsUrmZgVEsoDxXMH3VYKpnMbbwjQ", // DeGods
-    "3saAedkM9o5g1u5DCqsuMZuC4GRqPB4TuMkvSsSVvGQ3", // Okay Bears
-    "SMBH3wF6baUj3P1VeYPBrVZKWvS9RLnHxtMuMw2VXh", // SMB
-    "9ARngHhVaCtH5JFieRdSS5Y8cdZk2TMF4tfGSWPB4w", // Degen Ape Academy
-    "AURYydfxJib1y1WiPiZ3jKAE2qbNy64eiVxuzbQ2FqSLw", // Aurory
-    "7gxsWbTCQTtjuLgbemZkGT4TdALZo7CE8YJjjKnXE", // Thugbirdz
-    "66MZJWWM7ucWay8R2BzYgZVQHo3X2ZviYvCi4BCr42u6", // Solana Money Boys
-    "DTPkJWwRYi5RuKX4qyJY1H6H5kVWRzqSgq7XFzMweWwH" // Degen Trash Pandas
-  ],
-
-  // ⚙️ Bot Runtime Settings
-  scanIntervalMs: 10_000, // Every 10 seconds
-  maxConcurrentTrades: 3,
-
-  // 💰 Arbitrage thresholds
-  minProfitLamports: new BN(0.2 * 1e9), // 0.2 SOL minimum profit
-  feeBufferLamports: new BN(0.02 * 1e9), // 0.02 SOL for fees/slippage
-
-  // 📈 Logging
-  pnlLogFile: "pnl.csv",
+  enableJsonLogging: process.env.ENABLE_JSON_LOGGING === "true",
+  enableCsvLogging: process.env.ENABLE_CSV_LOGGING === "true",
+  logLevel: process.env.LOG_LEVEL || "info",
 };
