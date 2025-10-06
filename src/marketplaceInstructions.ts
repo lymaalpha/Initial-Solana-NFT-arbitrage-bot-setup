@@ -1,9 +1,15 @@
-import { Connection, PublicKey, Keypair } from '@solana/web3.js';
+import { Connection, PublicKey, Keypair, Transaction, TransactionInstruction } from '@solana/web3.js';
 import { Metaplex, keypairIdentity } from '@metaplex-foundation/js';
 import { NFTListing, NFTBid } from './types';
+import { pnlLogger } from './pnlLogger';
 
 export type ListingLike = Partial<NFTListing>;
 export type BidLike = Partial<NFTBid>;
+
+export interface SaleResponse {
+  response: any;
+  signature: string;
+}
 
 export async function executeSale({
   connection,
@@ -15,26 +21,40 @@ export async function executeSale({
   payerKeypair: Keypair;
   listing: ListingLike;
   bid: BidLike;
-}) {
-  if (!listing.auctionHouse || !listing.mint || !listing.price)
-    throw new Error('Listing missing auctionHouse, mint, or price');
+}): Promise<SaleResponse> {
+  if (!listing.auctionHouse || !listing.mint || !listing.price) {
+    const err = new Error('Listing missing auctionHouse, mint, or price');
+    pnlLogger.logError(err, { listing });
+    throw err;
+  }
 
-  const metaplex = Metaplex.make(connection).use(keypairIdentity(payerKeypair));
+  try {
+    const metaplex = Metaplex.make(connection).use(keypairIdentity(payerKeypair));
 
-  const auctionHouseObj = await metaplex.auctionHouse().findByAddress({
-    address: new PublicKey(listing.auctionHouse),
-  });
+    const auctionHouseObj = await metaplex.auctionHouse().findByAddress({
+      address: new PublicKey(listing.auctionHouse),
+    });
 
-  const buyerPubkey = bid.bidderPubkey ? new PublicKey(bid.bidderPubkey) : payerKeypair.publicKey;
+    const buyerPubkey = bid.bidderPubkey ? new PublicKey(bid.bidderPubkey) : payerKeypair.publicKey;
 
-  const saleResponse = await metaplex.auctionHouse().executeSale({
-    auctionHouse: auctionHouseObj,
-    buyer: buyerPubkey,
-    tokenMint: new PublicKey(listing.mint),
-    price: listing.price,
-    tokenSize: 1,
-  });
+    // Fixed: Correct input (tokenOwnerRecord for buyer, tokenOwner for seller)
+    const saleResponse = await metaplex.auctionHouse().executeSale({
+      auctionHouse: auctionHouseObj,
+      tokenOwnerRecord: buyerPubkey,  // Fixed: tokenOwnerRecord for buyer
+      tokenMint: new PublicKey(listing.mint),
+      price: listing.price.toNumber(),
+      tokenSize: 1,
+    });
 
-  const txSig = saleResponse.response?.signature || '';
-  return { response: saleResponse.response, signature: txSig };
+    const txSig = saleResponse.response?.signature || saleResponse.signature || '';
+    if (!txSig) {
+      throw new Error('No signature in sale response');
+    }
+
+    pnlLogger.logMetrics({ message: `✅ Sale executed: ${txSig}`, signature: txSig });
+    return { response: saleResponse, signature: txSig };
+  } catch (err: any) {
+    pnlLogger.logError(err, { listing: listing.mint, bid: bid.mint });
+    throw err;
+  }
 }
