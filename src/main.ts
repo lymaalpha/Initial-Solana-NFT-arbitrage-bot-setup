@@ -72,8 +72,8 @@ async function runBot() {
         signalsFound: signals.length,
         message: '📈 Cycle complete',
       });
-    } catch (err: Error) {  // Typed
-      pnlLogger.logError(err, { cycle: 'main loop' });
+    } catch (err: unknown) {  // Fixed: unknown
+      pnlLogger.logError(err as Error, { cycle: 'main loop' });
     }
 
     await new Promise((resolve) => setTimeout(resolve, SCAN_INTERVAL_MS));
@@ -89,7 +89,7 @@ process.on('SIGINT', () => {
   process.exit(0);
 });
 
-runBot().catch((err: Error) => {  // Typed
-  pnlLogger.logError(err);
+runBot().catch((err: unknown) => {  // Fixed
+  pnlLogger.logError(err as Error);
   process.exit(1);
 });
