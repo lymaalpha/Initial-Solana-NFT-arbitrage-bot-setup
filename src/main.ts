@@ -48,9 +48,9 @@ async function runBot() {
 
       if (topSignals.length > 0) {
         pnlLogger.logMetrics({ message: `🚀 Executing top ${topSignals.length} signals...` });
-        const trades = await executeBatch(topSignals);  // Use batch for concurrency
+        const trades = await executeBatch(topSignals);  // Use batch
 
-        trades.forEach((trade: TradeLog | null) => {  // Typed result
+        trades.forEach((trade: TradeLog | null) => {  // Typed
           if (trade) {
             botStats.totalTrades++;
             botStats.totalProfit += trade.netProfit.toNumber() / 1e9;
@@ -72,7 +72,7 @@ async function runBot() {
         signalsFound: signals.length,
         message: '📈 Cycle complete',
       });
-    } catch (err: Error) {  // Typed err
+    } catch (err: Error) {  // Typed
       pnlLogger.logError(err, { cycle: 'main loop' });
     }
 
@@ -89,7 +89,7 @@ process.on('SIGINT', () => {
   process.exit(0);
 });
 
-runBot().catch((err: Error) => {  // Typed err
+runBot().catch((err: Error) => {  // Typed
   pnlLogger.logError(err);
   process.exit(1);
 });
