@@ -1,7 +1,7 @@
 import { Connection, Keypair, PublicKey, Transaction, sendAndConfirmTransaction } from "@solana/web3.js";
 import { SolendAction, SolendMarket } from "@solendprotocol/solend-sdk";
 import { ArbitrageSignal, TradeLog } from './types';
-import { executeSale } from './marketplaceInstructions';  // Your sale function
+import { executeSale } from './marketplaceInstructions';
 import { pnlLogger } from './pnlLogger';
 import { config } from './config';
 import BN from 'bn.js';
@@ -17,7 +17,7 @@ export async function executeFlashloanTrade(signal: ArbitrageSignal): Promise<Tr
     pnlLogger.logMetrics({ message: `⚡ Executing flashloan for ${signal.targetListing.mint}` });
 
     // Initialize Solend market (fixed cluster)
-    const market = await SolendMarket.initialize(connection, 'production');  // "production" for mainnet
+    const market = await SolendMarket.initialize(connection, 'production');
     await market.loadReserves();
 
     const solReserve = market.reserves.find(r => r.config.symbol === 'SOL');
@@ -28,7 +28,7 @@ export async function executeFlashloanTrade(signal: ArbitrageSignal): Promise<Tr
 
     pnlLogger.logMetrics({ message: `💰 Borrowing ${borrowAmountSOL.toFixed(3)} SOL from Solend...` });
 
-    // Fixed: flashLoan method, BigInt amount, typed callback
+    // Fixed: flashLoan method, BigInt amount, no asset
     const flashloanResult = await SolendAction.flashLoan({
       connection,
       market,
