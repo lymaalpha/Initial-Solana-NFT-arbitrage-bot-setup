@@ -1,12 +1,13 @@
 import { Connection, Keypair } from "@solana/web3.js";
 import { scanForArbitrage } from "./scanForArbitrage";
-import { executeBatch } from "./autoFlashloanExecutor";
-import { pnlLogger } from "./pnlLogger";
+import { executeFlashloanArbitrage } from "./autoFlashloanExecutor";  // Your single trade func
+import { pnlLogger } from "./pnlLogger";  // For logs/metrics
 import { config } from "./config";
 import { ArbitrageSignal } from "./types";
 import BN from 'bn.js';
 import bs58 from 'bs58';
-import { fetchListings, fetchBids } from "./heliusMarketplace";  // Your marketplace
+import { fetchListings } from './heliusMarketplace';  // Your Helius listings
+import { fetchBids } from './tensorMarketplace';  // Your Tensor bids (assume similar to Helius)
 
 const connection = new Connection(config.rpcUrl, "confirmed");
 const payer = Keypair.fromSecretKey(bs58.decode(config.walletPrivateKey));
@@ -17,12 +18,14 @@ const MAX_CONCURRENT_TRADES = config.maxConcurrentTrades;
 let runningTrades = 0;
 
 async function loadActiveOpportunities(): Promise<ArbitrageSignal[]> {
-  // Stub—load from store if you have one; else empty for fresh
+  // Stub: Load from store/DB if you have one (e.g., Redis/SQLite for dedup)
+  // For now, return empty for fresh runs—expand as needed
   return [];
 }
 
 async function updateTradeResult(signal: ArbitrageSignal, result: any): Promise<void> {
-  // Stub—save to store; else log
+  // Stub: Save to store/DB if you have one
+  // For now, log to pnlLogger
   pnlLogger.logMetrics({ updatedMint: signal.targetListing.mint, result });
 }
 
@@ -37,8 +40,8 @@ async function processOpportunities() {
     let signals: ArbitrageSignal[] = [];
     for (const collectionMint of config.collections) {
       for (const marketplace of config.marketplaces) {
-        const listings = await fetchListings(collectionMint, marketplace);
-        const bids = await fetchBids(collectionMint, marketplace);
+        const listings = await fetchListings(collectionMint);  // Your Helius func
+        const bids = await fetchBids(collectionMint);  // Your Tensor func
         const cycleSignals = await scanForArbitrage(listings, bids, {
           minProfit: config.minProfitLamports,
           feeAdjustment: config.feeBufferLamports,
@@ -58,7 +61,7 @@ async function processOpportunities() {
     const active = await loadActiveOpportunities();
 
     // Execute new opportunities only
-    const newSignals = signals.filter(s => !active.find(a => a.targetListing.mint === s.targetListing.mint));
+    const newSignals = signals.filter(s => !active.find(a => a.targetListing.mint === s.targetListing.mint));  // Dedup by mint
 
     for (const signal of newSignals) {
       if (runningTrades >= MAX_CONCURRENT_TRADES) {
@@ -68,7 +71,7 @@ async function processOpportunities() {
 
       runningTrades++;
 
-      executeFlashloanTrade(signal)  // Single per your code
+      executeFlashloanArbitrage(signal)  // Your single trade func
         .then(async (result) => {
           await updateTradeResult(signal, result);
           pnlLogger.logMetrics({ 
@@ -108,6 +111,7 @@ main().catch((err) => {
   process.exit(1);
 });
 
+// Graceful shutdown
 process.on('SIGINT', () => {
   pnlLogger.logMetrics({ message: "Shutting down gracefully..." });
   process.exit(0);
