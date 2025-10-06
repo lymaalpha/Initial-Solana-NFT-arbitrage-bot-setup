@@ -1,9 +1,9 @@
-import { Connection, Keypair } from "@solana/web3.js";
-import { scanForArbitrage } from "./scanForArbitrage";
-import { executeFlashloanTrade } from "./autoFlashloanExecutor";  // Fixed name
-import { pnlLogger } from "./pnlLogger";
-import { config } from "./config";
-import { ArbitrageSignal, TradeLog } from "./types";  // Added TradeLog
+import { Connection, Keypair } from '@solana/web3.js';
+import { scanForArbitrage } from './scanForArbitrage';
+import { executeFlashloanTrade } from './autoFlashloanExecutor';  // Fixed name
+import { pnlLogger } from './pnlLogger';
+import { config } from './config';
+import { ArbitrageSignal, TradeLog } from './types';  // Added TradeLog
 import BN from 'bn.js';
 import bs58 from 'bs58';
 
@@ -72,7 +72,7 @@ async function runBot() {
         signalsFound: signals.length,
         message: '📈 Cycle complete',
       });
-    } catch (err: unknown) {  // Fixed: unknown type
+    } catch (err: unknown) {  // Fixed: unknown
       pnlLogger.logError(err as Error, { cycle: 'main loop' });
     }
 
