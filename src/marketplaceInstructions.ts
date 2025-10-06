@@ -1,4 +1,4 @@
-import { Connection, PublicKey, Keypair, Transaction, TransactionInstruction } from '@solana/web3.js';
+import { Connection, PublicKey, Keypair, Transaction, TransactionInstruction, sendAndConfirmTransaction } from '@solana/web3.js';
 import { Metaplex, keypairIdentity } from '@metaplex-foundation/js';
 import { NFTListing, NFTBid } from './types';
 import { pnlLogger } from './pnlLogger';
@@ -37,23 +37,25 @@ export async function executeSale({
 
     const buyerPubkey = bid.bidderPubkey ? new PublicKey(bid.bidderPubkey) : payerKeypair.publicKey;
 
-    // Fixed: tokenOwnerRecord for buyer, no 'buyer'
-    const saleResponse = await metaplex.auctionHouse().executeSale({
+    // Fixed: buyer: PublicKey, instructions output
+    const { instructions } = await metaplex.auctionHouse().executeSale({
       auctionHouse: auctionHouseObj,
-      tokenOwnerRecord: buyerPubkey,  // Fixed input
+      buyer: buyerPubkey,  // Fixed input
       tokenMint: new PublicKey(listing.mint),
       price: listing.price.toNumber(),
       tokenSize: 1,
     });
 
-    const txSig = saleResponse.signature || saleResponse.response?.signature || '';  // Fixed: direct signature
-    if (!txSig) {
-      throw new Error('No signature in sale response');
-    }
+    const tx = new Transaction().add(...instructions as TransactionInstruction[]);
 
-    pnlLogger.logMetrics({ message: `✅ Sale executed: ${txSig}`, signature: txSig });
-    return { response: saleResponse, signature: txSig };
-  } catch (err: unknown) {  // Fixed: unknown
+    // Send and get signature
+    const txSig = await sendAndConfirmTransaction(connection, tx, [payerKeypair], {
+      commitment: 'confirmed',
+    });
+
+    pnlLogger.logMetrics({ message: `✅ Sale executed: ${txSig}` });
+    return { response: { instructions }, signature: txSig };
+  } catch (err: unknown) {
     pnlLogger.logError(err as Error, { listing: listing.mint, bid: bid.mint });
     throw err;
   }
