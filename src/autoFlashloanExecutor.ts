@@ -17,10 +17,10 @@ export async function executeFlashloanTrade(signal: ArbitrageSignal): Promise<Tr
     pnlLogger.logMetrics({ message: `⚡ Executing flashloan for ${signal.targetListing.mint}` });
 
     // Initialize Solend market
-    const market = await SolendMarket.initialize(connection, 'production');  // Fixed cluster
+    const market = await SolendMarket.initialize(connection, 'production');
     await market.loadReserves();
 
-    const solReserve = market.reserves.find(r => r.config.symbol === 'SOL');  // Fixed: symbol, no asset
+    const solReserve = market.reserves.find(r => r.config.symbol === 'SOL');
     if (!solReserve) throw new Error('SOL reserve not found');
 
     const borrowAmount = signal.targetListing.price.add(config.feeBufferLamports);
@@ -28,15 +28,14 @@ export async function executeFlashloanTrade(signal: ArbitrageSignal): Promise<Tr
 
     pnlLogger.logMetrics({ message: `💰 Borrowing ${borrowAmountSOL.toFixed(3)} SOL from Solend...` });
 
-    // Fixed: flashLoanTxns method, BigInt amount, typed callback
-    const { transaction } = await SolendAction.flashLoanTxns({  // Fixed method name
+    // Fixed: flashLoan method, BigInt amount, typed callback
+    const flashloanResult = await SolendAction.flashLoan({
       connection,
       market,
       payer,
       reserve: solReserve,
-      amount: BigInt(borrowAmount.toString()),  // BigInt for precision
-      callback: async (conn: Connection, keypair: Keypair) => {  // Typed params
-        // Execute the NFT sale inside the flashloan
+      amount: BigInt(borrowAmount.toString()),
+      callback: async (conn: Connection, keypair: Keypair) => {
         return await executeSale({
           connection: conn,
           payerKeypair: keypair,
@@ -46,17 +45,8 @@ export async function executeFlashloanTrade(signal: ArbitrageSignal): Promise<Tr
       },
     });
 
-    let txSig: string | undefined;
-    if (!config.simulateOnly) {
-      txSig = await sendAndConfirmTransaction(connection, transaction, [payer], {
-        commitment: 'confirmed',
-        maxRetries: 3,
-      }).then(s => s);
-    } else {
-      txSig = `sim_tx_${Date.now()}`;
-    }
-
-    pnlLogger.logMetrics({ message: `🔗 Flashloan executed successfully: ${txSig}` });
+    const txSig = flashloanResult?.response?.signature || '';
+    pnlLogger.logPnL(signal, txSig, 'executed');
 
     return {
       timestamp: Date.now(),
