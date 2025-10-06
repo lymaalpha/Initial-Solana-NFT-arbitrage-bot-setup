@@ -1,40 +1,45 @@
-import { Connection, Keypair } from '@solana/web3.js';
-import BN from 'bn.js';
+import { Connection, Keypair, PublicKey, Transaction, sendAndConfirmTransaction } from "@solana/web3.js";
+import { SolendAction, SolendMarket } from "@solendprotocol/solend-sdk";
 import { ArbitrageSignal, TradeLog } from './types';
-import { executeSale } from './marketplaceInstructions';
+import { executeSale } from './marketplaceInstructions';  // Your sale function
 import { pnlLogger } from './pnlLogger';
 import { config } from './config';
+import BN from 'bn.js';
 import bs58 from 'bs58';
-import { SolendMarket, SolendAction } from '@solendprotocol/solend-sdk';
 
 const connection = new Connection(config.rpcUrl, 'confirmed');
 const payer = Keypair.fromSecretKey(bs58.decode(config.walletPrivateKey));
 
-const MAX_CONCURRENT_TRADES = 2;
+const MAX_CONCURRENT_TRADES = config.maxConcurrentTrades;
 
 export async function executeFlashloanTrade(signal: ArbitrageSignal): Promise<TradeLog | null> {
   try {
-    // Initialize Solend market
-    const market = await SolendMarket.initialize(connection, 'mainnet-beta');
+    pnlLogger.logMetrics({ message: `⚡ Executing flashloan for ${signal.targetListing.mint}` });
+
+    // Initialize Solend market (fixed cluster)
+    const market = await SolendMarket.initialize(connection, 'production');  // "production" for mainnet
     await market.loadReserves();
 
-    const solReserve = market.reserves.find(r => r.asset === 'SOL');
+    const solReserve = market.reserves.find(r => r.config.symbol === 'SOL');
     if (!solReserve) throw new Error('SOL reserve not found');
 
     const borrowAmount = signal.targetListing.price.add(config.feeBufferLamports);
+    const borrowAmountSOL = borrowAmount.toNumber() / 1e9;
 
-    // Execute flashloan with callback
+    pnlLogger.logMetrics({ message: `💰 Borrowing ${borrowAmountSOL.toFixed(3)} SOL from Solend...` });
+
+    // Fixed: flashLoan method, BigInt amount, typed callback
     const flashloanResult = await SolendAction.flashLoan({
       connection,
       market,
       payer,
       reserve: solReserve,
-      amount: borrowAmount.toNumber() / 1e9, // SOL
-      callback: async () => {
+      amount: BigInt(borrowAmount.toString()),  // BigInt for precision
+      callback: async (conn: Connection, keypair: Keypair) => {
         // Execute the NFT sale inside the flashloan
         return await executeSale({
-          connection,
-          payerKeypair: payer,
+          connection: conn,
+          payerKeypair: keypair,
           listing: signal.targetListing,
           bid: signal.targetBid,
         });
