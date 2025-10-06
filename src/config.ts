@@ -14,8 +14,8 @@ export interface BotConfig {
   heliusApiKey: string;
   tensorApiKey: string;
   openseaApiKey: string;
-  collections: string[];  // From COLLECTION_MINTS
-  marketplaces: string[];  // From MARKETPLACES
+  collections: string[];
+  marketplaces: string[];
   minProfitLamports: BN;
   feeBufferLamports: BN;
   scanIntervalMs: number;
@@ -23,7 +23,7 @@ export interface BotConfig {
   enableJsonLogging: boolean;
   enableCsvLogging: boolean;
   logLevel: string;
-  simulateOnly: boolean;  // For testing—no real txs
+  simulateOnly: boolean;
 }
 
 function parseNumber(value: string | undefined, defaultValue: number, name: string): number {
