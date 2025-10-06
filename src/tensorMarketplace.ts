@@ -18,7 +18,7 @@ export async function fetchListings(collectionMint: string): Promise<NFTListing[
       timestamp: now,
       sellerPubkey: item.seller,
     }));
-  } catch (err: unknown) {  // Fixed: unknown
+  } catch (err: unknown) {
     console.error('Tensor fetchListings error:', err);
     return [];
   }
@@ -39,7 +39,7 @@ export async function fetchBids(collectionMint: string): Promise<NFTBid[]> {
       timestamp: now,
       bidderPubkey: item.bidder,
     }));
-  } catch (err: unknown) {  // Fixed
+  } catch (err: unknown) {
     console.error('Tensor fetchBids error:', err);
     return [];
   }
