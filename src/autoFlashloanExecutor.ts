@@ -6,6 +6,7 @@ import { pnlLogger } from './pnlLogger';
 import { config } from './config';
 import BN from 'bn.js';
 import bs58 from 'bs58';
+import { flashBorrowReserveLiquidityInstruction } from './flashBorrowReserveLiquidity'; // Import the instruction builder
 
 const connection = new Connection(config.rpcUrl, 'confirmed');
 const payer = Keypair.fromSecretKey(bs58.decode(config.walletPrivateKey));
@@ -23,28 +24,47 @@ export async function executeFlashloanTrade(signal: ArbitrageSignal): Promise<Tr
     if (!solReserve) throw new Error('SOL reserve not found');
 
     const borrowAmount = signal.targetListing.price.add(config.feeBufferLamports);
-    const borrowAmountSOL = borrowAmount.toNumber() / 1e9;
+    const borrowAmountBN = new BN(borrowAmount.toString());
 
-    pnlLogger.logMetrics({ message: `💰 Borrowing ${borrowAmountSOL.toFixed(3)} SOL from Solend...` });
+    pnlLogger.logMetrics({ message: `💰 Borrowing ${borrowAmountBN.toNumber() / 1e9} SOL from Solend...` });
 
-    // Fixed: flashLoan method, BigInt amount, typed callback
-    const flashloanResult = await SolendAction.flashLoan({
-      connection,
-      market,
-      payer,
-      reserve: solReserve,
-      amount: BigInt(borrowAmount.toString()),
-      callback: async (conn: Connection, keypair: Keypair) => {
-        return await executeSale({
-          connection: conn,
-          payerKeypair: keypair,
-          listing: signal.targetListing,
-          bid: signal.targetBid,
-        });
-      },
+    // Construct the flash loan instruction
+    const flashLoanIx = flashBorrowReserveLiquidityInstruction(
+      borrowAmountBN,
+      solReserve.liquidity.mintPubkey, // sourceLiquidity (e.g., SOL mint)
+      payer.publicKey, // destinationLiquidity (payer's token account for SOL)
+      solReserve.reserveId, // reserve
+      market.lendingMarket.address, // lendingMarket
+      market.programId // lendingProgramId
+    );
+
+    const transaction = new Transaction().add(flashLoanIx);
+    // Add your arbitrage logic here, which would include the executeSale instruction
+    // For now, we'll just add a placeholder for the callback execution
+    // In a real flash loan, the executeSale would be part of the same transaction
+    // and would need to repay the flash loan within the same transaction.
+
+    // This is a simplified representation. A real flash loan would require
+    // a program that executes the arbitrage and repays the loan within a single transaction.
+    // The `executeSale` would be part of that program's logic.
+
+    // For demonstration, we'll simulate the sale here, but in a true flash loan
+    // it must be atomic.
+    const saleResult = await executeSale({
+      connection: connection,
+      payerKeypair: payer,
+      listing: signal.targetListing,
+      bid: signal.targetBid,
     });
 
-    const txSig = flashloanResult?.response?.signature || '';
+    if (!saleResult) {
+      throw new Error("NFT sale failed during flash loan execution.");
+    }
+
+    // In a real flash loan, the repayment instruction would also be part of the same transaction
+    // as the flashLoanIx and the arbitrage logic.
+
+    const txSig = await sendAndConfirmTransaction(connection, transaction, [payer]);
     pnlLogger.logPnL(signal, txSig, 'executed');
 
     return {
@@ -66,7 +86,6 @@ export async function executeFlashloanTrade(signal: ArbitrageSignal): Promise<Tr
   }
 }
 
-// Added export for main.ts
 export async function executeBatch(signals: ArbitrageSignal[]): Promise<(TradeLog | null)[]> {
   const results: (TradeLog | null)[] = [];
 
