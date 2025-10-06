@@ -3,56 +3,45 @@ import axios from 'axios';
 import { NFTListing, NFTBid } from './types';
 import { config } from './config';
 
-export async function fetchListings(collectionMint: string, auctionHouse: string = 'Helius'): Promise<NFTListing[]> {
+export async function fetchListings(collectionMint: string): Promise<NFTListing[]> {
   try {
-    let url = '';
-    if (auctionHouse === 'Helius') {
-      url = `https://api.helius.xyz/v0/collections/${collectionMint}/listings?api-key=${config.heliusApiKey}&limit=50`;
-    } else if (auctionHouse === 'MagicEden') {
-      url = `https://api-mainnet.magiceden.dev/v2/collections/${collectionMint}/listings?offset=0&limit=50`;
-    } // Add Tensor/OpenSea
-
+    const url = `https://api.helius.xyz/v0/collections/${collectionMint}/listings?api-key=${config.heliusApiKey}&limit=50`;
     const resp = await axios.get(url);
     const now = Date.now();
 
-    return resp.data.map((item: any) => ({
+    return resp.data.map((item: any) => ({  // Typed as any for API flexibility
       mint: item.tokenMint,
-      auctionHouse,
+      auctionHouse: 'Helius',
       price: new BN(item.price * 1e9),
-      assetMint: item.tokenMint,  // Or WSOL
+      assetMint: item.tokenMint,
       currency: 'SOL',
-      timestamp: item.timestamp || now,
+      timestamp: now,
       sellerPubkey: item.seller,
-    })).filter(item => item.price.gt(new BN(0)));  // Invalid filter
+    }));
   } catch (err) {
-    console.error(`${auctionHouse} fetchListings error:`, err);
+    console.error('Helius fetchListings error:', err);
     return [];
   }
 }
 
-export async function fetchBids(collectionMint: string, auctionHouse: string = 'Tensor'): Promise<NFTBid[]> {
+export async function fetchBids(collectionMint: string): Promise<NFTBid[]> {
   try {
-    let url = '';
-    if (auctionHouse === 'Tensor') {
-      url = `https://api.tensor.trade/v1/collections/${collectionMint}/bids?limit=50`;
-    } else if (auctionHouse === 'MagicEden') {
-      url = `https://api-mainnet.magiceden.dev/v2/collections/${collectionMint}/bids?limit=50`;
-    } // Add Helius bids if available
-
+    // Helius bids endpoint (if available; fallback to Tensor)
+    const url = `https://api.helius.xyz/v0/collections/${collectionMint}/bids?api-key=${config.heliusApiKey}&limit=50`;
     const resp = await axios.get(url);
     const now = Date.now();
 
     return resp.data.map((item: any) => ({
       mint: item.mint,
-      auctionHouse,
+      auctionHouse: 'Helius',
       price: new BN(item.price * 1e9),
-      assetMint: 'So11111111111111111111111111111111111111112',  // WSOL
+      assetMint: 'So11111111111111111111111111111111111111112',
       currency: 'SOL',
-      timestamp: item.timestamp || now,
+      timestamp: now,
       bidderPubkey: item.bidder,
-    })).filter(item => item.price.gt(new BN(0)));
+    }));
   } catch (err) {
-    console.error(`${auctionHouse} fetchBids error:`, err);
+    console.error('Helius fetchBids error:', err);
     return [];
   }
 }
