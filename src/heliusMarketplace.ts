@@ -10,7 +10,7 @@ export async function fetchListings(collectionMint: string, auctionHouse: string
       url = `https://api.helius.xyz/v0/collections/${collectionMint}/listings?api-key=${config.heliusApiKey}&limit=50`;
     } else if (auctionHouse === 'MagicEden') {
       url = `https://api-mainnet.magiceden.dev/v2/collections/${collectionMint}/listings?offset=0&limit=50`;
-    } // Add more
+    } // Add Tensor/OpenSea
 
     const resp = await axios.get(url);
     const now = Date.now();
@@ -23,7 +23,7 @@ export async function fetchListings(collectionMint: string, auctionHouse: string
       currency: 'SOL',
       timestamp: item.timestamp || now,
       sellerPubkey: item.seller,
-    })).filter(item => item.price.gt(new BN(0)));  // Filter invalid
+    })).filter(item => item.price.gt(new BN(0)));  // Invalid filter
   } catch (err) {
     console.error(`${auctionHouse} fetchListings error:`, err);
     return [];
@@ -37,7 +37,7 @@ export async function fetchBids(collectionMint: string, auctionHouse: string = '
       url = `https://api.tensor.trade/v1/collections/${collectionMint}/bids?limit=50`;
     } else if (auctionHouse === 'MagicEden') {
       url = `https://api-mainnet.magiceden.dev/v2/collections/${collectionMint}/bids?limit=50`;
-    } // Add more
+    } // Add Helius bids if available
 
     const resp = await axios.get(url);
     const now = Date.now();
