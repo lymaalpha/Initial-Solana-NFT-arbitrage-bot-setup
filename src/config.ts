@@ -20,6 +20,7 @@ export interface BotConfig {
   feeBufferLamports: BN;
   scanIntervalMs: number;
   maxConcurrentTrades: number;
+  minSignals: number;  // Added for main.ts
   enableJsonLogging: boolean;
   enableCsvLogging: boolean;
   logLevel: string;
@@ -56,6 +57,7 @@ function validateConfig(): BotConfig {
     feeBufferLamports: new BN(parseNumber(process.env.FEE_BUFFER_SOL, 0.002, 'FEE_BUFFER_SOL') * 1e9),
     scanIntervalMs: parseNumber(process.env.SCAN_INTERVAL_MS, 10000, 'SCAN_INTERVAL_MS'),
     maxConcurrentTrades: parseInt(process.env.MAX_CONCURRENT_TRADES || '3', 10),
+    minSignals: parseInt(process.env.MIN_SIGNALS || '1', 10),  // Added
     enableJsonLogging: process.env.ENABLE_JSON_LOGGING === "true",
     enableCsvLogging: process.env.ENABLE_CSV_LOGGING === "true",
     logLevel: process.env.LOG_LEVEL || "info",
