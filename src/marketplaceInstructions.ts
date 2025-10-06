@@ -37,24 +37,24 @@ export async function executeSale({
 
     const buyerPubkey = bid.bidderPubkey ? new PublicKey(bid.bidderPubkey) : payerKeypair.publicKey;
 
-    // Fixed: Correct input (tokenOwnerRecord for buyer, tokenOwner for seller)
+    // Fixed: tokenOwnerRecord for buyer, no 'buyer'
     const saleResponse = await metaplex.auctionHouse().executeSale({
       auctionHouse: auctionHouseObj,
-      tokenOwnerRecord: buyerPubkey,  // Fixed: tokenOwnerRecord for buyer
+      tokenOwnerRecord: buyerPubkey,  // Fixed input
       tokenMint: new PublicKey(listing.mint),
       price: listing.price.toNumber(),
       tokenSize: 1,
     });
 
-    const txSig = saleResponse.response?.signature || saleResponse.signature || '';
+    const txSig = saleResponse.signature || saleResponse.response?.signature || '';  // Fixed: direct signature
     if (!txSig) {
       throw new Error('No signature in sale response');
     }
 
     pnlLogger.logMetrics({ message: `✅ Sale executed: ${txSig}`, signature: txSig });
     return { response: saleResponse, signature: txSig };
-  } catch (err: any) {
-    pnlLogger.logError(err, { listing: listing.mint, bid: bid.mint });
+  } catch (err: unknown) {  // Fixed: unknown
+    pnlLogger.logError(err as Error, { listing: listing.mint, bid: bid.mint });
     throw err;
   }
 }
