@@ -1,110 +1,88 @@
-import { Connection, Keypair } from '@solana/web3.js';
-import { scanForArbitrage } from './scanForArbitrage';
-import { executeBatch } from './autoFlashloanExecutor';  // Fixed name and import
-import { pnlLogger } from './pnlLogger';
-import { config } from './config';
-import { ArbitrageSignal, TradeLog } from './types';  // Added TradeLog
-import BN from 'bn.js';
-import bs58 from 'bs58';
+import { startOpportunityScanner } from "./scanner";
+import { executeFlashloanArbitrage } from "./autoFlashloanExecutor";
+import { loadActiveOpportunities, updateTradeResult } from "./store";
+import logger from "./utils/logger";
 
-import { fetchListings as fetchHeliusListings, fetchBids as fetchHeliusBids } from './heliusMarketplace'; // Assuming heliusMarketplace exists
-import { fetchListings as fetchTensorListings, fetchBids as fetchTensorBids } from './tensorMarketplace'; // Assuming tensorMarketplace exists
+const SCAN_INTERVAL_MS = 10_000; // 10 seconds
 
-const connection = new Connection(config.rpcUrl, 'confirmed');
-const payer = Keypair.fromSecretKey(bs58.decode(config.walletPrivateKey));
-
-const SCAN_INTERVAL_MS = config.scanIntervalMs;
-const MAX_CONCURRENT_TRADES = config.maxConcurrentTrades;  // Fixed property
-
-interface BotStats {
-  totalProfit: number;
-  totalTrades: number;
-  lastScan: number;
-}
-const botStats: BotStats = { totalProfit: 0, totalTrades: 0, lastScan: 0 };
-
-async function runBot() {
-  pnlLogger.logMetrics({ message: '🚀 Flashloan Arbitrage Bot starting...' });
-
-  while (true) {
-    const startTime = Date.now();
-    try {
-      const opportunities = config.collections;  // Fixed: collections array
-      let signals: ArbitrageSignal[] = [];
-
-      for (const collectionMint of opportunities) {
-        // Fetch from Helius
-        const heliusListings = await fetchHeliusListings(collectionMint);
-        pnlLogger.logMetrics({ fetchedHeliusListings: heliusListings.length, status: 'ok', mint: collectionMint });  // Debug
-
-        const heliusBids = await fetchHeliusBids(collectionMint);
-        pnlLogger.logMetrics({ fetchedHeliusBids: heliusBids.length, status: 'ok', mint: collectionMint });  // Debug
-
-        // Fetch from Tensor
-        const tensorListings = await fetchTensorListings(collectionMint);
-        pnlLogger.logMetrics({ fetchedTensorListings: tensorListings.length, status: 'ok', mint: collectionMint });  // Debug
-
-        const tensorBids = await fetchTensorBids(collectionMint);
-        pnlLogger.logMetrics({ fetchedTensorBids: tensorBids.length, status: 'ok', mint: collectionMint });  // Debug
-
-        const listings = [...heliusListings, ...tensorListings];
-        const bids = [...heliusBids, ...tensorBids];
-
-        const cycleSignals = await scanForArbitrage(listings, bids);  // Fixed: 2 args
-        pnlLogger.logMetrics({ cycleSignals: cycleSignals.length, message: 'Scan complete', mint: collectionMint });  // Debug
-
-        signals = signals.concat(cycleSignals);
-      }
-
-      const topSignals = signals
-        .filter((s) => s.estimatedNetProfit.gt(new BN(0)))
-        .sort((a, b) => b.estimatedNetProfit.sub(a.estimatedNetProfit).toNumber())
-        .slice(0, MAX_CONCURRENT_TRADES);
-
-      if (topSignals.length > 0) {
-        pnlLogger.logMetrics({ message: `🚀 Executing top ${topSignals.length} signals...` });
-        const trades = await executeBatch(topSignals);  // Use batch
-
-        trades.forEach((trade: TradeLog | null) => {  // Typed
-          if (trade) {
-            botStats.totalTrades++;
-            botStats.totalProfit += trade.netProfit.toNumber() / 1e9;
-            pnlLogger.logMetrics({
-              message: `💰 Trade complete | +${trade.netProfit.toNumber() / 1e9} SOL | Total: ${botStats.totalProfit.toFixed(3)} SOL`,
-              trade,
-            });
-          }
-        });
-      } else {
-        pnlLogger.logMetrics({ message: '⚡ No profitable signals in this scan.' });
-      }
-
-      botStats.lastScan = Date.now();
-      pnlLogger.logMetrics({
-        cycleTime: (Date.now() - startTime) / 1000,
-        totalTrades: botStats.totalTrades,
-        totalProfit: botStats.totalProfit,
-        signalsFound: signals.length,
-        message: '📈 Cycle complete',
-      });
-    } catch (err: unknown) {  // Fixed: unknown
-      pnlLogger.logError(err as Error, { cycle: 'main loop' });
-    }
-
-    await new Promise((resolve) => setTimeout(resolve, SCAN_INTERVAL_MS));
+// --- Safe fetch wrapper ---
+async function safeFetch(fetchFn: () => Promise<any[]>, source: string, mint: string) {
+  try {
+    const result = await fetchFn();
+    logger.info(`[FETCH] ${source} for ${mint}: ${result.length} items`);
+    return result;
+  } catch (err) {
+    logger.error(`[ERROR] Failed fetch from ${source} for ${mint}: ${(err as Error).message}`);
+    return [];
   }
 }
 
-process.on('SIGINT', () => {
-  pnlLogger.logMetrics({
-    message: `Shutting down | ${botStats.totalTrades} trades, ${botStats.totalProfit.toFixed(3)} SOL profit`,
-    finalStats: botStats,
-  });
-  pnlLogger.close();
-  process.exit(0);
-});
+// --- Main scan loop ---
+async function runScanner() {
+  const collections = loadActiveOpportunities(); // Array of collection mints
+  for (const collection of collections) {
+    const mint = collection.mint;
 
-runBot().catch((err: unknown) => {  // Fixed
-  pnlLogger.logError(err as Error);
-  process.exit(1);
-});
+    // Fetch listings/bids safely
+    const heliusListings = await safeFetch(
+      () => startOpportunityScanner.fetchHeliusListings(mint),
+      "HeliusListings",
+      mint
+    );
+    const heliusBids = await safeFetch(
+      () => startOpportunityScanner.fetchHeliusBids(mint),
+      "HeliusBids",
+      mint
+    );
+    const tensorListings = await safeFetch(
+      () => startOpportunityScanner.fetchTensorListings(mint),
+      "TensorListings",
+      mint
+    );
+    const tensorBids = await safeFetch(
+      () => startOpportunityScanner.fetchTensorBids(mint),
+      "TensorBids",
+      mint
+    );
+
+    // If nothing fetched, skip
+    if (
+      heliusListings.length === 0 &&
+      heliusBids.length === 0 &&
+      tensorListings.length === 0 &&
+      tensorBids.length === 0
+    ) {
+      logger.warn(`[WARN] No data fetched for ${mint}, skipping arbitrage`);
+      continue;
+    }
+
+    // Process arbitrage opportunities
+    const signalsFound = startOpportunityScanner.findArbitrageSignals({
+      heliusListings,
+      heliusBids,
+      tensorListings,
+      tensorBids,
+      mint,
+    });
+
+    logger.info(`[INFO] Signals found for ${mint}: ${signalsFound.length}`);
+
+    // Execute if any
+    for (const signal of signalsFound) {
+      try {
+        await executeFlashloanArbitrage(signal);
+        updateTradeResult(signal, "success");
+      } catch (err) {
+        logger.error(`[ERROR] Failed execution for ${mint}: ${(err as Error).message}`);
+        updateTradeResult(signal, "failed");
+      }
+    }
+  }
+
+  // Schedule next cycle
+  setTimeout(runScanner, SCAN_INTERVAL_MS);
+}
+
+// --- Start scanner ---
+logger.info("Starting NFT arbitrage bot...");
+runScanner();
