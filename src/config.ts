@@ -20,7 +20,7 @@ export interface BotConfig {
   feeBufferLamports: BN;
   scanIntervalMs: number;
   maxConcurrentTrades: number;
-  minSignals: number;  // Added for main.ts
+  minSignals: number;  // Added
   enableJsonLogging: boolean;
   enableCsvLogging: boolean;
   logLevel: string;
