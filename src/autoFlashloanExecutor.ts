@@ -16,7 +16,6 @@ export async function executeFlashloanTrade(signal: ArbitrageSignal): Promise<Tr
   try {
     pnlLogger.logMetrics({ message: `⚡ Executing flashloan for ${signal.targetListing.mint}` });
 
-    // Initialize Solend market
     const market = await SolendMarket.initialize(connection, 'production');
     await market.loadReserves();
 
@@ -28,8 +27,8 @@ export async function executeFlashloanTrade(signal: ArbitrageSignal): Promise<Tr
 
     pnlLogger.logMetrics({ message: `💰 Borrowing ${borrowAmountSOL.toFixed(3)} SOL from Solend...` });
 
-    // Fixed: flashLoan method, BigInt amount, typed callback
-    const flashloanResult = await SolendAction.flashLoan({
+    // Fixed: flashLoanTxns method, BigInt amount, typed callback
+    const { transaction } = await SolendAction.flashLoanTxns({
       connection,
       market,
       payer,
@@ -45,8 +44,17 @@ export async function executeFlashloanTrade(signal: ArbitrageSignal): Promise<Tr
       },
     });
 
-    const txSig = flashloanResult?.response?.signature || '';
-    pnlLogger.logPnL(signal, txSig, 'executed');
+    let txSig: string | undefined;
+    if (!config.simulateOnly) {
+      txSig = await sendAndConfirmTransaction(connection, transaction, [payer], {
+        commitment: 'confirmed',
+        maxRetries: 3,
+      }).then(s => s);
+    } else {
+      txSig = `sim_tx_${Date.now()}`;
+    }
+
+    pnlLogger.logMetrics({ message: `🔗 Flashloan executed successfully: ${txSig}` });
 
     return {
       timestamp: Date.now(),
@@ -59,9 +67,10 @@ export async function executeFlashloanTrade(signal: ArbitrageSignal): Promise<Tr
       type: 'executed',
       executorType: 'flash_loan',
     };
-  } catch (err: any) {
+  } catch (err: unknown) {  // Fixed: unknown type
+    const errorMsg = (err as Error).message || 'Unknown error';
     pnlLogger.logPnL(signal, undefined, 'failed');
-    pnlLogger.logError(err, { signal });
+    pnlLogger.logError(new Error(errorMsg), { signal });
     return null;
   }
 }
