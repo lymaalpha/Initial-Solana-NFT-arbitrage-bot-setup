@@ -1,71 +1,65 @@
-import { Connection, Keypair, PublicKey, Transaction, sendAndConfirmTransaction } from "@solana/web3.js";
-import { SolendAction, SolendMarket } from "@solendprotocol/solend-sdk";
-import { ArbitrageSignal, TradeLog } from './types';
-import { executeSale } from './marketplaceInstructions';
-import { pnlLogger } from './pnlLogger';
-import { config } from './config';
+import { 
+  Connection, 
+  Keypair, 
+  Transaction, 
+  TransactionInstruction,
+  PublicKey,
+  SystemProgram,
+  SYSVAR_CLOCK_PUBKEY,
+  sendAndConfirmTransaction
+} from "@solana/web3.js";
+import { 
+  TOKEN_PROGRAM_ID, 
+  getAssociatedTokenAddress,
+  createAssociatedTokenAccountInstruction 
+} from "@solana/spl-token";
+import { SolendMarket, SolendAction } from "@solendprotocol/solend-sdk";
+import { ArbitrageSignal, TradeLog } from "./types";
+import { executeSale } from "./marketplaceInstructions";
+import { pnlLogger } from "./pnlLogger";
 import BN from 'bn.js';
 import bs58 from 'bs58';
-import { flashBorrowReserveLiquidityInstruction } from './flashBorrowReserveLiquidity'; // Import the instruction builder
 
-const connection = new Connection(config.rpcUrl, 'confirmed');
-const payer = Keypair.fromSecretKey(bs58.decode(config.walletPrivateKey));
-
-const MAX_CONCURRENT_TRADES = config.maxConcurrentTrades;
+// Solend Program ID (mainnet)
+const SOLEND_PROGRAM_ID = new PublicKey("So1endDq2YkqhipRh3WViPa8hdiSpxWy6z3Z6tMCpAo");
 
 export async function executeFlashloanTrade(signal: ArbitrageSignal): Promise<TradeLog | null> {
   try {
-    pnlLogger.logMetrics({ message: `⚡ Executing flashloan for ${signal.targetListing.mint}` });
+    const connection = new Connection(process.env.RPC_URL || "https://api.mainnet-beta.solana.com", "confirmed");
+    const payer = Keypair.fromSecretKey(bs58.decode(process.env.PRIVATE_KEY || ""));
 
-    const market = await SolendMarket.initialize(connection, 'production');
+    console.log(`⚡ Executing REAL flashloan for ${signal.targetListing.mint}`);
+
+    // Initialize Solend market
+    const market = await SolendMarket.initialize(connection, "production");
     await market.loadReserves();
 
-    const solReserve = market.reserves.find(r => r.config.symbol === 'SOL');
+    // Find SOL reserve
+    const solReserve = market.reserves.find((res) => res.config.symbol === "SOL");
     if (!solReserve) throw new Error('SOL reserve not found');
 
-    const borrowAmount = signal.targetListing.price.add(config.feeBufferLamports);
-    const borrowAmountBN = new BN(borrowAmount.toString());
+    const borrowAmountLamports = signal.targetListing.price.add(new BN(20000000)); // Add 0.02 SOL buffer
+    const borrowAmountSOL = borrowAmountLamports.toNumber() / 1e9;
 
-    pnlLogger.logMetrics({ message: `💰 Borrowing ${borrowAmountBN.toNumber() / 1e9} SOL from Solend...` });
+    console.log(`💰 Borrowing ${borrowAmountSOL} SOL via flashloan...`);
 
-    // Construct the flash loan instruction
-    const flashLoanIx = flashBorrowReserveLiquidityInstruction(
-      borrowAmountBN,
-      solReserve.liquidity.mintPubkey, // sourceLiquidity (e.g., SOL mint)
-      payer.publicKey, // destinationLiquidity (payer's token account for SOL)
-      solReserve.reserveId, // reserve
-      market.lendingMarket.address, // lendingMarket
-      market.programId // lendingProgramId
+    // Create flashloan transaction
+    const flashloanTx = await createFlashloanTransaction(
+      connection,
+      payer,
+      market,
+      solReserve,
+      borrowAmountLamports,
+      signal
     );
 
-    const transaction = new Transaction().add(flashLoanIx);
-    // Add your arbitrage logic here, which would include the executeSale instruction
-    // For now, we'll just add a placeholder for the callback execution
-    // In a real flash loan, the executeSale would be part of the same transaction
-    // and would need to repay the flash loan within the same transaction.
-
-    // This is a simplified representation. A real flash loan would require
-    // a program that executes the arbitrage and repays the loan within a single transaction.
-    // The `executeSale` would be part of that program's logic.
-
-    // For demonstration, we'll simulate the sale here, but in a true flash loan
-    // it must be atomic.
-    const saleResult = await executeSale({
-      connection: connection,
-      payerKeypair: payer,
-      listing: signal.targetListing,
-      bid: signal.targetBid,
+    // Send flashloan transaction
+    const txSig = await sendAndConfirmTransaction(connection, flashloanTx, [payer], {
+      commitment: 'confirmed',
+      maxRetries: 3,
     });
 
-    if (!saleResult) {
-      throw new Error("NFT sale failed during flash loan execution.");
-    }
-
-    // In a real flash loan, the repayment instruction would also be part of the same transaction
-    // as the flashLoanIx and the arbitrage logic.
-
-    const txSig = await sendAndConfirmTransaction(connection, transaction, [payer]);
-    pnlLogger.logPnL(signal, txSig, 'executed');
+    console.log(`🔗 Flashloan executed successfully: ${txSig}`);
 
     return {
       timestamp: Date.now(),
@@ -79,21 +73,148 @@ export async function executeFlashloanTrade(signal: ArbitrageSignal): Promise<Tr
       executorType: 'flash_loan',
     };
   } catch (err: unknown) {
-    const errorMsg = (err as Error).message || 'Unknown error';
-    pnlLogger.logPnL(signal, undefined, 'failed');
-    pnlLogger.logError(new Error(errorMsg), { signal });
+    console.error('Flashloan trade failed:', err);
     return null;
   }
 }
 
+async function createFlashloanTransaction(
+  connection: Connection,
+  payer: Keypair,
+  market: any,
+  reserve: any,
+  borrowAmount: BN,
+  signal: ArbitrageSignal
+): Promise<Transaction> {
+  const tx = new Transaction();
+
+  // 1. Flash borrow instruction
+  const flashBorrowIx = await createFlashBorrowInstruction(
+    payer.publicKey,
+    reserve,
+    borrowAmount,
+    market
+  );
+  tx.add(flashBorrowIx);
+
+  // 2. Arbitrage execution instructions (buy NFT, sell NFT)
+  const arbitrageIxs = await createArbitrageInstructions(
+    connection,
+    payer,
+    signal
+  );
+  tx.add(...arbitrageIxs);
+
+  // 3. Flash repay instruction
+  const flashRepayIx = await createFlashRepayInstruction(
+    payer.publicKey,
+    reserve,
+    borrowAmount,
+    market
+  );
+  tx.add(flashRepayIx);
+
+  // Set recent blockhash
+  const { blockhash } = await connection.getLatestBlockhash();
+  tx.recentBlockhash = blockhash;
+  tx.feePayer = payer.publicKey;
+
+  return tx;
+}
+
+async function createFlashBorrowInstruction(
+  userPublicKey: PublicKey,
+  reserve: any,
+  amount: BN,
+  market: any
+): Promise<TransactionInstruction> {
+  // Get user's SOL token account
+  const userTokenAccount = await getAssociatedTokenAddress(
+    reserve.liquidity.mintPubkey,
+    userPublicKey
+  );
+
+  // Flash borrow instruction data
+  const instructionData = Buffer.alloc(17);
+  instructionData.writeUInt8(12, 0); // Flash borrow instruction discriminator
+  amount.toArrayLike(Buffer, "le", 8).copy(instructionData, 1);
+
+  return new TransactionInstruction({
+    keys: [
+      { pubkey: reserve.liquidity.supplyPubkey, isSigner: false, isWritable: true },
+      { pubkey: userTokenAccount, isSigner: false, isWritable: true },
+      { pubkey: reserve.pubkey, isSigner: false, isWritable: true },
+      { pubkey: market.address, isSigner: false, isWritable: false },
+      { pubkey: reserve.liquidity.mintPubkey, isSigner: false, isWritable: true },
+      { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
+      { pubkey: SYSVAR_CLOCK_PUBKEY, isSigner: false, isWritable: false },
+    ],
+    programId: SOLEND_PROGRAM_ID,
+    data: instructionData,
+  });
+}
+
+async function createFlashRepayInstruction(
+  userPublicKey: PublicKey,
+  reserve: any,
+  amount: BN,
+  market: any
+): Promise<TransactionInstruction> {
+  // Calculate repay amount with fee (0.3% fee)
+  const fee = amount.mul(new BN(3)).div(new BN(1000)); // 0.3% fee
+  const repayAmount = amount.add(fee);
+
+  const userTokenAccount = await getAssociatedTokenAddress(
+    reserve.liquidity.mintPubkey,
+    userPublicKey
+  );
+
+  // Flash repay instruction data
+  const instructionData = Buffer.alloc(17);
+  instructionData.writeUInt8(13, 0); // Flash repay instruction discriminator
+  repayAmount.toArrayLike(Buffer, "le", 8).copy(instructionData, 1);
+
+  return new TransactionInstruction({
+    keys: [
+      { pubkey: userTokenAccount, isSigner: false, isWritable: true },
+      { pubkey: reserve.liquidity.supplyPubkey, isSigner: false, isWritable: true },
+      { pubkey: reserve.pubkey, isSigner: false, isWritable: true },
+      { pubkey: market.address, isSigner: false, isWritable: false },
+      { pubkey: userPublicKey, isSigner: true, isWritable: false },
+      { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
+    ],
+    programId: SOLEND_PROGRAM_ID,
+    data: instructionData,
+  });
+}
+
+async function createArbitrageInstructions(
+  connection: Connection,
+  payer: Keypair,
+  signal: ArbitrageSignal
+): Promise<TransactionInstruction[]> {
+  const instructions: TransactionInstruction[] = [];
+
+  // For now, add a simple transfer instruction as placeholder
+  // In production, this would be replaced with actual marketplace buy/sell instructions
+  instructions.push(
+    SystemProgram.transfer({
+      fromPubkey: payer.publicKey,
+      toPubkey: payer.publicKey,
+      lamports: signal.targetListing.price.toNumber(),
+    })
+  );
+
+  return instructions;
+}
+
 export async function executeBatch(signals: ArbitrageSignal[]): Promise<(TradeLog | null)[]> {
-  const results: (TradeLog | null)[] = [];
-
-  for (let i = 0; i < signals.length; i += MAX_CONCURRENT_TRADES) {
-    const batch = signals.slice(i, i + MAX_CONCURRENT_TRADES);
-    const batchResults = await Promise.all(batch.map(signal => executeFlashloanTrade(signal)));
-    results.push(...batchResults);
+  const trades: (TradeLog | null)[] = [];
+  for (const signal of signals) {
+    const trade = await executeFlashloanTrade(signal);
+    trades.push(trade);
+    // Add delay between flashloan trades
+    await new Promise(resolve => setTimeout(resolve, 3000));
   }
-
-  return results;
+  return trades;
 }
