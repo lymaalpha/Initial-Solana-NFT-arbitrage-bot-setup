@@ -1,7 +1,7 @@
 import { scanForArbitrage } from './scanForArbitrage';
 import { config } from './config';
 import { ArbitrageSignal } from './types';
-import { fetchListings, fetchBids } from './heliusMarketplace';  // Or tensor
+import { fetchListings, fetchBids } from './heliusMarketplace';
 
 export async function startOpportunityScanner(opportunities: string[], marketplaces: string[]): Promise<ArbitrageSignal[]> {
   let signals: ArbitrageSignal[] = [];
