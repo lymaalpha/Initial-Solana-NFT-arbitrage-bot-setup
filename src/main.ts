@@ -35,16 +35,23 @@ async function runBot() {
       for (const collectionMint of opportunities) {
         // Fetch from Helius
         const heliusListings = await fetchHeliusListings(collectionMint);
+        pnlLogger.logMetrics({ fetchedHeliusListings: heliusListings.length, status: 'ok', mint: collectionMint });  // Debug
+
         const heliusBids = await fetchHeliusBids(collectionMint);
+        pnlLogger.logMetrics({ fetchedHeliusBids: heliusBids.length, status: 'ok', mint: collectionMint });  // Debug
 
         // Fetch from Tensor
         const tensorListings = await fetchTensorListings(collectionMint);
+        pnlLogger.logMetrics({ fetchedTensorListings: tensorListings.length, status: 'ok', mint: collectionMint });  // Debug
+
         const tensorBids = await fetchTensorBids(collectionMint);
+        pnlLogger.logMetrics({ fetchedTensorBids: tensorBids.length, status: 'ok', mint: collectionMint });  // Debug
 
         const listings = [...heliusListings, ...tensorListings];
         const bids = [...heliusBids, ...tensorBids];
 
         const cycleSignals = await scanForArbitrage(listings, bids);  // Fixed: 2 args
+        pnlLogger.logMetrics({ cycleSignals: cycleSignals.length, message: 'Scan complete', mint: collectionMint });  // Debug
 
         signals = signals.concat(cycleSignals);
       }
