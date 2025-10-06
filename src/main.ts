@@ -1,118 +1,95 @@
-import { Connection, Keypair } from "@solana/web3.js";
-import { scanForArbitrage } from "./scanForArbitrage";
-import { executeFlashloanArbitrage } from "./autoFlashloanExecutor";  // Your single trade func
-import { pnlLogger } from "./pnlLogger";  // For logs/metrics
-import { config } from "./config";
-import { ArbitrageSignal } from "./types";
+import { Connection, Keypair } from '@solana/web3.js';
+import { scanForArbitrage } from './scanForArbitrage';
+import { executeFlashloanTrade } from './autoFlashloanExecutor';  // Fixed name
+import { pnlLogger } from './pnlLogger';
+import { config } from './config';
+import { ArbitrageSignal, TradeLog } from './types';  // Added TradeLog
 import BN from 'bn.js';
 import bs58 from 'bs58';
-import { fetchListings } from './heliusMarketplace';  // Your Helius listings
-import { fetchBids } from './tensorMarketplace';  // Your Tensor bids (assume similar to Helius)
 
-const connection = new Connection(config.rpcUrl, "confirmed");
+import { fetchListings } from './heliusMarketplace';
+import { fetchBids } from './tensorMarketplace';
+
+const connection = new Connection(config.rpcUrl, 'confirmed');
 const payer = Keypair.fromSecretKey(bs58.decode(config.walletPrivateKey));
 
 const SCAN_INTERVAL_MS = config.scanIntervalMs;
-const MAX_CONCURRENT_TRADES = config.maxConcurrentTrades;
+const MAX_CONCURRENT_TRADES = config.maxConcurrentTrades;  // Fixed property
 
-let runningTrades = 0;
-
-async function loadActiveOpportunities(): Promise<ArbitrageSignal[]> {
-  // Stub: Load from store/DB if you have one (e.g., Redis/SQLite for dedup)
-  // For now, return empty for fresh runs—expand as needed
-  return [];
+interface BotStats {
+  totalProfit: number;
+  totalTrades: number;
+  lastScan: number;
 }
+const botStats: BotStats = { totalProfit: 0, totalTrades: 0, lastScan: 0 };
 
-async function updateTradeResult(signal: ArbitrageSignal, result: any): Promise<void> {
-  // Stub: Save to store/DB if you have one
-  // For now, log to pnlLogger
-  pnlLogger.logMetrics({ updatedMint: signal.targetListing.mint, result });
-}
+async function runBot() {
+  pnlLogger.logMetrics({ message: '🚀 Flashloan Arbitrage Bot starting...' });
 
-async function processOpportunities() {
-  try {
-    pnlLogger.logMetrics({ 
-      message: `🔍 Scanning ${config.collections.length} collections on ${config.marketplaces.join(", ")}`,
-      collections: config.collections,
-      marketplaces: config.marketplaces 
-    });
+  while (true) {
+    const startTime = Date.now();
+    try {
+      const opportunities = config.collections;  // Fixed: collections array
+      let signals: ArbitrageSignal[] = [];
 
-    let signals: ArbitrageSignal[] = [];
-    for (const collectionMint of config.collections) {
-      for (const marketplace of config.marketplaces) {
-        const listings = await fetchListings(collectionMint);  // Your Helius func
-        const bids = await fetchBids(collectionMint);  // Your Tensor func
-        const cycleSignals = await scanForArbitrage(listings, bids, {
-          minProfit: config.minProfitLamports,
-          feeAdjustment: config.feeBufferLamports,
-        });
+      for (const collectionMint of opportunities) {
+        const listings = await fetchListings(collectionMint);
+        const bids = await fetchBids(collectionMint);
+
+        const cycleSignals = await scanForArbitrage(listings, bids);  // Fixed: 2 args
+
         signals = signals.concat(cycleSignals);
       }
-    }
 
-    if (!signals || signals.length === 0) {
-      pnlLogger.logMetrics({ message: "No arbitrage opportunities found this round." });
-      return;
-    }
+      const topSignals = signals
+        .filter((s) => s.estimatedNetProfit.gt(new BN(0)))
+        .sort((a, b) => b.estimatedNetProfit.sub(a.estimatedNetProfit).toNumber())
+        .slice(0, MAX_CONCURRENT_TRADES);
 
-    pnlLogger.logMetrics({ opportunitiesFound: signals.length, message: "📊 Found potential opportunities" });
+      if (topSignals.length > 0) {
+        pnlLogger.logMetrics({ message: `🚀 Executing top ${topSignals.length} signals...` });
+        const trades = await executeBatch(topSignals);  // Use batch for concurrency
 
-    // Load previous trade history
-    const active = await loadActiveOpportunities();
-
-    // Execute new opportunities only
-    const newSignals = signals.filter(s => !active.find(a => a.targetListing.mint === s.targetListing.mint));  // Dedup by mint
-
-    for (const signal of newSignals) {
-      if (runningTrades >= MAX_CONCURRENT_TRADES) {
-        pnlLogger.logMetrics({ message: "⚠️ Max concurrent trades reached. Skipping new opportunities..." });
-        break;
+        trades.forEach((trade: TradeLog | null) => {  // Typed result
+          if (trade) {
+            botStats.totalTrades++;
+            botStats.totalProfit += trade.netProfit.toNumber() / 1e9;
+            pnlLogger.logMetrics({
+              message: `💰 Trade complete | +${trade.netProfit.toNumber() / 1e9} SOL | Total: ${botStats.totalProfit.toFixed(3)} SOL`,
+              trade,
+            });
+          }
+        });
+      } else {
+        pnlLogger.logMetrics({ message: '⚡ No profitable signals in this scan.' });
       }
 
-      runningTrades++;
-
-      executeFlashloanArbitrage(signal)  // Your single trade func
-        .then(async (result) => {
-          await updateTradeResult(signal, result);
-          pnlLogger.logMetrics({ 
-            message: `✅ Trade complete for ${signal.targetListing.mint} | Profit: ${result?.netProfit?.toNumber() / 1e9 || 0} SOL`,
-            result 
-          });
-        })
-        .catch((err) => {
-          pnlLogger.logError(err, { mint: signal.targetListing.mint });
-        })
-        .finally(() => {
-          runningTrades--;
-        });
+      botStats.lastScan = Date.now();
+      pnlLogger.logMetrics({
+        cycleTime: (Date.now() - startTime) / 1000,
+        totalTrades: botStats.totalTrades,
+        totalProfit: botStats.totalProfit,
+        signalsFound: signals.length,
+        message: '📈 Cycle complete',
+      });
+    } catch (err: Error) {  // Typed err
+      pnlLogger.logError(err, { cycle: 'main loop' });
     }
-  } catch (err) {
-    pnlLogger.logError(err as Error, { cycle: 'processOpportunities' });
+
+    await new Promise((resolve) => setTimeout(resolve, SCAN_INTERVAL_MS));
   }
 }
 
-async function main() {
-  pnlLogger.logMetrics({ 
-    message: "🟢 NFT Arbitrage Bot started...",
-    collections: config.collections.length,
-    marketplaces: config.marketplaces.length,
-    rpcUrl: config.rpcUrl 
+process.on('SIGINT', () => {
+  pnlLogger.logMetrics({
+    message: `Shutting down | ${botStats.totalTrades} trades, ${botStats.totalProfit.toFixed(3)} SOL profit`,
+    finalStats: botStats,
   });
-
-  // Initial scan
-  await processOpportunities();
-
-  // Repeated scans
-  setInterval(processOpportunities, SCAN_INTERVAL_MS);
-}
-
-main().catch((err) => {
-  pnlLogger.logError(err, { cycle: 'startup' });
-  process.exit(1);
+  pnlLogger.close();
+  process.exit(0);
 });
 
-// Graceful shutdown
-process.on('SIGINT', () => {
-  pnlLogger.logMetrics({ message: "Shutting down gracefully..." });
-  process.exit(0);
+runBot().catch((err: Error) => {  // Typed err
+  pnlLogger.logError(err);
+  process.exit(1);
 });
