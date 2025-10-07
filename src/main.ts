@@ -1,4 +1,4 @@
-// src/main.ts (UPDATED VERSION WITH COMPREHENSIVE DEBUGGING)
+// src/main.ts (FIXED VERSION WITH CORRECT IMPORTS)
 import { Connection, Keypair } from "@solana/web3.js";
 import { scanForArbitrage } from "./scanForArbitrage";
 import { executeBatch } from "./autoFlashloanExecutor";
@@ -8,10 +8,10 @@ import { config } from "./config";
 import BN from 'bn.js';
 import bs58 from 'bs58';
 
-// Import real API functions using your existing file structure
+// Import real API functions using your actual file structure
 import * as MagicEdenAPI from './magicEdenMarketplace';
-import * as TensorAPI from './tensor';
-import * as HeliusAPI from './helius';
+import * as TensorAPI from './tensorMarketplace';
+import * as HeliusAPI from './heliusMarketplace';
 
 let totalProfit = 0;
 let totalTrades = 0;
