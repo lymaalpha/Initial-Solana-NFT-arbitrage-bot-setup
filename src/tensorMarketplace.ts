@@ -1,128 +1,106 @@
 // src/tensorMarketplace.ts
-import {
-  ApolloClient,
-  InMemoryCache,
-  gql,
-  HttpLink,
-  ApolloLink,
-  concat,
-} from "@apollo/client/core";
-import fetch from "cross-fetch";
+import { Connection } from "@solana/web3.js";
+import { TensorMarketplace } from "@tensor-foundation/marketplace";
 import BN from "bn.js";
 import { NFTListing, NFTBid } from "./types";
 import { config } from "./config";
 import { pnlLogger } from "./pnlLogger";
 
-// --- Apollo Client Setup for Tensor ---
-const authLink = new ApolloLink((operation, forward) => {
-  operation.setContext({
-    headers: {
-      "X-TENSOR-API-KEY": config.tensorApiKey || "",
-    },
-  });
-  return forward(operation);
-});
+// Initialize the connection using the RPC URL from your config
+const connection = new Connection(config.rpcUrl, "confirmed");
 
-// CORRECTED: The GraphQL endpoint is api.tensor.so/graphql
-const httpLink = new HttpLink({ uri: "https://api.tensor.so/graphql", fetch } );
+// Initialize the Tensor Marketplace client
+const marketplace = new TensorMarketplace({ connection });
 
-const client = new ApolloClient({
-  link: concat(authLink, httpLink ),
-  cache: new InMemoryCache(),
-  defaultOptions: {
-    query: {
-      fetchPolicy: "no-cache",
-    },
-    watchQuery: {
-      fetchPolicy: "no-cache",
-    },
-  },
-});
-
-// --- GraphQL Queries ---
-const GET_COLLECTION_LISTINGS_QUERY = gql`
-  query ActiveListingsV2($slug: String!) {
-    activeListingsV2(slug: $slug, sortBy: PriceAsc) {
-      txs {
-        mint
-        txId
-        grossAmount
-        seller
-      }
-    }
-  }
-`;
-
-const GET_COLLECTION_BIDS_QUERY = gql`
-  query TcompBids($slug: String!) {
-    tcompBids(slug: $slug) {
-      bids {
-        mint
-        price
-        bidder
-      }
-    }
-  }
-`;
-
-// --- Fetch Functions ---
+/**
+ * Fetches active listings for a collection directly from the blockchain
+ * using the Tensor SDK.
+ */
 export async function fetchListings(collectionId: string): Promise<NFTListing[]> {
   try {
-    const { data } = await client.query({
-      query: GET_COLLECTION_LISTINGS_QUERY,
-      variables: { slug: collectionId },
+    // The SDK uses the collection mint address (which you already have)
+    // It fetches "pools" which represent different types of listings.
+    // We'll focus on the most common ones.
+    const pools = await marketplace.getPools({
+      slug: collectionId,
     });
 
-    if (!data || !data.activeListingsV2) {
-      return [];
+    const now = Date.now();
+    const listings: NFTListing[] = [];
+
+    // Process single-listing pools (Taker-side)
+    if (pools.taker.txs) {
+      pools.taker.txs.forEach((item) => {
+        listings.push({
+          mint: item.mint,
+          auctionHouse: "Tensor",
+          price: new BN(item.grossAmount), // Price is in lamports
+          assetMint: item.mint,
+          currency: "SOL",
+          timestamp: now,
+          sellerPubkey: item.seller,
+        });
+      });
     }
 
-    const now = Date.now();
-    return data.activeListingsV2.txs.map((item: any) => ({
-      mint: item.mint,
-      auctionHouse: "Tensor",
-      price: new BN(item.grossAmount), // Price is already in lamports
-      assetMint: item.mint,
-      currency: "SOL",
-      timestamp: now,
-      sellerPubkey: item.seller,
-    }));
+    return listings;
   } catch (err) {
     pnlLogger.logError(err as Error, {
-      message: `Tensor fetchListings error for collection ${collectionId}`,
-      source: "Tensor",
+      message: `Tensor SDK fetchListings error for collection ${collectionId}`,
+      source: "TensorSDK",
       collection: collectionId,
     });
     return [];
   }
 }
 
+/**
+ * Fetches active bids for a collection directly from the blockchain
+ * using the Tensor SDK.
+ */
 export async function fetchBids(collectionId: string): Promise<NFTBid[]> {
   try {
-    const { data } = await client.query({
-      query: GET_COLLECTION_BIDS_QUERY,
-      variables: { slug: collectionId },
+    // Fetch collection-wide bids (Top bid and Bid-walls)
+    const bids = await marketplace.getBids({
+      slug: collectionId,
     });
 
-    if (!data || !data.tcompBids) {
-      return [];
+    const now = Date.now();
+    const allBids: NFTBid[] = [];
+
+    // Process top bid if it exists
+    if (bids.top) {
+      allBids.push({
+        mint: collectionId, // Collection bid
+        auctionHouse: "Tensor",
+        price: new BN(bids.top.price), // Price is in lamports
+        assetMint: "So11111111111111111111111111111111111111112",
+        currency: "SOL",
+        timestamp: now,
+        bidderPubkey: bids.top.bidder,
+      });
     }
 
-    const now = Date.now();
-    // Tensor component bids are collection-wide
-    return data.tcompBids.map((bid: any) => ({
-      mint: collectionId, // This is a collection bid
-      auctionHouse: "Tensor",
-      price: new BN(bid.price), // Price is in lamports
-      assetMint: "So11111111111111111111111111111111111111112",
-      currency: "SOL",
-      timestamp: now,
-      bidderPubkey: bid.bidder,
-    }));
+    // Process other bids (bid walls)
+    if (bids.bids) {
+      bids.bids.forEach((bid) => {
+        allBids.push({
+          mint: collectionId, // Collection bid
+          auctionHouse: "Tensor",
+          price: new BN(bid.price),
+          assetMint: "So1111111111111111111111111111111111111111112",
+          currency: "SOL",
+          timestamp: now,
+          bidderPubkey: bid.bidder,
+        });
+      });
+    }
+
+    return allBids;
   } catch (err) {
     pnlLogger.logError(err as Error, {
-      message: `Tensor fetchBids error for collection ${collectionId}`,
-      source: "Tensor",
+      message: `Tensor SDK fetchBids error for collection ${collectionId}`,
+      source: "TensorSDK",
       collection: collectionId,
     });
     return [];
