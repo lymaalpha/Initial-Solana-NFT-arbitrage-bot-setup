@@ -2,44 +2,40 @@
 import BN from 'bn.js';
 import axios from 'axios';
 import { NFTListing, NFTBid } from './types';
-import { config } from './config'; // Assuming config has simpleHashApiKey
+import { config } from './config';
 import { pnlLogger } from './pnlLogger';
 
 const API_BASE_URL = 'https://api.simplehash.com/api/v0/nfts';
 
+// Create an axios instance with headers and a timeout
 const api = axios.create({
-  baseURL: API_BASE_URL,
   headers: {
-    'X-API-KEY': config.simpleHashApiKey, // Make sure to add this key to your config.ts
+    'X-API-KEY': config.simpleHashApiKey,
   },
+  timeout: 10000, // 10-second timeout
 } );
 
-/**
- * Fetches active listings (asks) for a collection from SimpleHash.
- * SimpleHash aggregates data from multiple marketplaces.
- */
 export async function fetchListings(collectionId: string): Promise<NFTListing[]> {
+  // CORRECTED: Construct the full URL manually to avoid redirect issues
+  const url = `${API_BASE_URL}/listings/collection/${collectionId}`;
   try {
-    // The endpoint for collection listings
-    const response = await api.get(`/listings/collection/${collectionId}`, {
+    const response = await api.get(url, {
       params: {
-        // You can add more params here if needed, e.g., limit
         limit: 50,
       },
     });
 
     const now = Date.now();
-    const listings: NFTListing[] = response.data.listings.map((item: any) => ({
-      mint: item.nft_id.split('/')[2], // Extract mint from 'solana/{mint}/0'
-      auctionHouse: item.marketplace_id, // e.g., 'tensor', 'magiceden'
-      price: new BN(item.price), // Price is already in lamports (as a string)
-      assetMint: item.nft_id.split('/')[2],
+    // The actual data is in response.data.listings
+    return response.data.listings.map((item: any) => ({
+      mint: item.nft_id.split('/')[1], // 'solana/{mint}'
+      auctionHouse: item.marketplace_id,
+      price: new BN(item.price), // Price is already a string of lamports
+      assetMint: item.nft_id.split('/')[1],
       currency: 'SOL',
       timestamp: now,
       sellerPubkey: item.seller_address,
     }));
-
-    return listings;
   } catch (err) {
     pnlLogger.logError(err as Error, {
       message: `SimpleHash fetchListings error for collection ${collectionId}`,
@@ -50,33 +46,27 @@ export async function fetchListings(collectionId: string): Promise<NFTListing[]>
   }
 }
 
-/**
- * Fetches active bids (offers) for a collection from SimpleHash.
- * This provides the crucial bid data that was missing.
- */
 export async function fetchBids(collectionId: string): Promise<NFTBid[]> {
+  // CORRECTED: Construct the full URL manually
+  const url = `${API_BASE_URL}/bids/collection/${collectionId}`;
   try {
-    // The endpoint for collection bids
-    const response = await api.get(`/bids/collection/${collectionId}`, {
+    const response = await api.get(url, {
       params: {
         limit: 50,
       },
     });
 
     const now = Date.now();
-    const bids: NFTBid[] = response.data.bids.map((item: any) => ({
-      // Note: Collection bids don't have a specific mint, so we can use the collectionId
-      // or a placeholder. For arbitrage, the bid applies to any NFT in the collection.
-      mint: collectionId, 
+    // The actual data is in response.data.bids
+    return response.data.bids.map((item: any) => ({
+      mint: collectionId, // Collection bid
       auctionHouse: item.marketplace_id,
       price: new BN(item.price), // Price is in lamports
-      assetMint: 'So11111111111111111111111111111111111111112', // Standard for SOL bids
+      assetMint: 'So11111111111111111111111111111111111111112',
       currency: 'SOL',
       timestamp: now,
       bidderPubkey: item.bidder_address,
     }));
-
-    return bids;
   } catch (err) {
     pnlLogger.logError(err as Error, {
       message: `SimpleHash fetchBids error for collection ${collectionId}`,
