@@ -39,13 +39,7 @@
     "jest": "^29.7.0",
     "@types/jest": "^29.5.8"
   },
-  "keywords": [
-    "solana",
-    "nft",
-    "arbitrage",
-    "flash-loans",
-    "trading-bot"
-  ],
+  "keywords": [ "solana", "nft", "arbitrage", "flash-loans", "trading-bot" ],
   "author": "Your Name",
   "license": "MIT"
 }
