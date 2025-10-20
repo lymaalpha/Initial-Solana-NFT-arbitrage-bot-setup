@@ -1,4 +1,3 @@
-// src/raribleMarketplace.ts
 import axios from 'axios';
 import BN from 'bn.js';
 import { NFTListing, NFTBid } from './types';
@@ -123,13 +122,10 @@ export async function fetchBids(collectionMint: string): Promise<NFTBid[]> {
 
 export async function healthCheck(): Promise<boolean> {
   try {
-    const response = await axios.get(`${RARIBLE_GATEWAY}/items/count`, {
-      timeout: 5000,
-    });
+    const response = await axios.get(`${RARIBLE_GATEWAY}/items/count`, { timeout: 5000 });
     return response.status === 200;
   } catch {
     return false;
   }
 }
-
 export default { fetchListings, fetchBids, healthCheck };
