@@ -1,4 +1,4 @@
-// src/main.ts (✅ FIXED: SimpleHash → Moralis)
+// src/main.ts (✅ FIXED: Separate listings vs bids arrays)
 import { Connection, Keypair } from "@solana/web3.js";
 import { scanForArbitrage } from "./scanForArbitrage";
 import { executeBatch } from "./autoFlashloanExecutor";
@@ -8,34 +8,34 @@ import { config } from "./config";
 import BN from 'bn.js';
 import bs58 from 'bs58';
 
-// ✅ FIXED: Import Moralis instead of SimpleHash
+// Import real API functions
 import * as MagicEdenAPI from './magicEdenMarketplace';
 import * as TensorAPI from './tensorMarketplace';
-import * as MoralisAPI from './moralisMarketplace'; // ✅ CHANGED
+import * as MoralisAPI from './moralisMarketplace';
 
 let totalProfit = 0;
 let totalTrades = 0;
 let cycleCount = 0;
 
-// ✅ FIXED: Collection mappings with moralis field
+// Collection mappings
 const COLLECTIONS = [
   {
     name: 'Mad Lads',
     magicEden: 'mad_lads',
     tensor: 'DRiP2Pn2K6fuMLKQmt5rZWyHiUZ6WK3GChEySUpHSS4x',
-    moralis: 'DRiP2Pn2K6fuMLKQmt5rZWyHiUZ6WK3GChEySUpHSS4x' // ✅ CHANGED: simpleHash → moralis
+    moralis: 'DRiP2Pn2K6fuMLKQmt5rZWyHiUZ6WK3GChEySUpHSS4x'
   },
   {
     name: 'Okay Bears',
     magicEden: 'okay_bears',
     tensor: 'BUjZjAS2vbbb65g7Z1Ca9ZRVYoJscURG5L3AkVvHP9ac',
-    moralis: 'BUjZjAS2vbbb65g7Z1Ca9ZRVYoJscURG5L3AkVvHP9ac' // ✅ CHANGED
+    moralis: 'BUjZjAS2vbbb65g7Z1Ca9ZRVYoJscURG5L3AkVvHP9ac'
   },
   {
     name: 'DeGods',
     magicEden: 'degods',
     tensor: '6XxjKYFbcndh2gDcsUrmZgVEsoDxXMnfsaGY6fpTJzNr',
-    moralis: '6XxjKYFbcndh2gDcsUrmZgVEsoDxXMnfsaGY6fpTJzNr' // ✅ CHANGED
+    moralis: '6XxjKYFbcndh2gDcsUrmZgVEsoDxXMnfsaGY6fpTJzNr'
   },
 ];
 
@@ -50,10 +50,7 @@ async function safeFetch<T>(
   try {
     pnlLogger.logMetrics({
       message: `🔄 Starting fetch: ${source} ${type} for ${collection}`,
-      source,
-      collection,
-      type,
-      status: 'starting'
+      source, collection, type, status: 'starting'
     });
 
     const result = await fetchFn();
@@ -61,12 +58,7 @@ async function safeFetch<T>(
 
     pnlLogger.logMetrics({
       message: `✅ Fetch successful: ${source} ${type} for ${collection} - ${result.length} items in ${fetchTime}ms`,
-      source,
-      collection,
-      type,
-      count: result.length,
-      fetchTimeMs: fetchTime,
-      status: 'success'
+      source, collection, type, count: result.length, fetchTimeMs: fetchTime, status: 'success'
     });
 
     return result;
@@ -74,11 +66,7 @@ async function safeFetch<T>(
     const fetchTime = Date.now() - startTime;
     const errorDetails = {
       message: `❌ Fetch failed: ${source} ${type} for ${collection}`,
-      source,
-      collection,
-      type,
-      fetchTimeMs: fetchTime,
-      status: 'error',
+      source, collection, type, fetchTimeMs: fetchTime, status: 'error',
       errorType: err.name || 'Unknown',
       errorMessage: err.message || 'Unknown error',
       statusCode: err.response?.status,
@@ -91,7 +79,7 @@ async function safeFetch<T>(
 }
 
 async function runBot() {
-  // ✅ FIXED: Health check Moralis API
+  // Health check Moralis
   try {
     const moralisHealthy = await MoralisAPI.healthCheck();
     pnlLogger.logMetrics({
@@ -105,7 +93,7 @@ async function runBot() {
   pnlLogger.logMetrics({
     message: "🚀 Real Arbitrage Bot starting with live data...",
     collections: COLLECTIONS.map(c => c.name),
-    dataSources: ['MagicEden', 'Tensor', 'Moralis (Aggregator)'], // ✅ CHANGED
+    dataSources: ['MagicEden', 'Tensor', 'Moralis (Aggregator)'],
     minProfitSOL: config.minProfitLamports.toNumber() / 1e9,
     scanIntervalMs: config.scanIntervalMs,
     simulateOnly: config.simulateOnly
@@ -132,24 +120,32 @@ async function runBot() {
             collection: collection.name,
           });
 
-          // ✅ FIXED: Use MoralisAPI instead of SimpleHashAPI
-          const fetchPromises = [
+          // ✅ FIXED: Separate listings and bids fetches
+          const listingsPromises = [
             safeFetch(() => MagicEdenAPI.fetchListings(collection.magicEden), 'MagicEden', collection.name, 'listings'),
-            safeFetch(() => MagicEdenAPI.fetchBids(collection.magicEden), 'MagicEden', collection.name, 'bids'),
             safeFetch(() => TensorAPI.fetchListings(collection.tensor), 'Tensor', collection.name, 'listings'),
+            safeFetch(() => MoralisAPI.fetchListings(collection.moralis), 'Moralis', collection.name, 'listings'),
+          ] as const; // ✅ Type assertion for tuple
+
+          const bidsPromises = [
+            safeFetch(() => MagicEdenAPI.fetchBids(collection.magicEden), 'MagicEden', collection.name, 'bids'),
             safeFetch(() => TensorAPI.fetchBids(collection.tensor), 'Tensor', collection.name, 'bids'),
-            safeFetch(() => MoralisAPI.fetchListings(collection.moralis), 'Moralis', collection.name, 'listings'), // ✅ CHANGED
-            safeFetch(() => MoralisAPI.fetchBids(collection.moralis), 'Moralis', collection.name, 'bids'),         // ✅ CHANGED
-          ];
+            safeFetch(() => MoralisAPI.fetchBids(collection.moralis), 'Moralis', collection.name, 'bids'),
+          ] as const; // ✅ Type assertion for tuple
 
-          // ✅ FIXED: Variable names (moralisListings instead of shListings)
-          const [meListings, meBids, tensorListings, tensorBids, moralisListings, moralisBids] = await Promise.all(fetchPromises);
+          // ✅ FIXED: Fetch listings and bids SEPARATELY
+          const [meListings, tensorListings, moralisListings] = await Promise.all(listingsPromises);
+          const [meBids, tensorBids, moralisBids] = await Promise.all(bidsPromises);
 
-          const allListings: NFTListing[] = [...meListings, ...tensorListings, ...moralisListings]; // ✅ CHANGED
-          const allBids: NFTBid[] = [...meBids, ...tensorBids, ...moralisBids]; // ✅ CHANGED
+          // ✅ FIXED: Combine ONLY listings → NFTListing[]
+          const allListings: NFTListing[] = [...meListings, ...tensorListings, ...moralisListings];
+          
+          // ✅ FIXED: Combine ONLY bids → NFTBid[]
+          const allBids: NFTBid[] = [...meBids, ...tensorBids, ...moralisBids];
+          
           totalItems += allListings.length + allBids.length;
 
-          // ✅ FIXED: Metrics logging
+          // Log collection summary
           pnlLogger.logMetrics({
             message: `📈 Collection ${collection.name} summary:`,
             collection: collection.name,
@@ -157,13 +153,13 @@ async function runBot() {
             magicEdenBids: meBids.length,
             tensorListings: tensorListings.length,
             tensorBids: tensorBids.length,
-            moralisListings: moralisListings.length, // ✅ CHANGED
-            moralisBids: moralisBids.length,         // ✅ CHANGED
+            moralisListings: moralisListings.length,
+            moralisBids: moralisBids.length,
             totalListings: allListings.length,
             totalBids: allBids.length,
           });
 
-          // Scan for arbitrage opportunities between the combined lists
+          // ✅ FIXED: Pass PURE NFTListing[] and NFTBid[] to scanForArbitrage
           if (allListings.length > 0 && allBids.length > 0) {
             const signals = await scanForArbitrage(allListings, allBids);
             if (signals.length > 0) {
@@ -184,7 +180,7 @@ async function runBot() {
         }
       }
 
-      // Cycle summary (UNCHANGED)
+      // Cycle summary
       pnlLogger.logMetrics({
         message: `📊 Scan cycle #${cycleCount} complete`,
         cycle: cycleCount,
@@ -198,7 +194,7 @@ async function runBot() {
           totalSignals: allSignals.length
         });
 
-        // Filter and sort signals (UNCHANGED)
+        // Filter and sort signals
         const minProfitThreshold = config.minProfitLamports;
         const topSignals = allSignals
           .filter((s) => s.estimatedNetProfit.gt(minProfitThreshold))
@@ -268,7 +264,7 @@ async function runBot() {
   }
 }
 
-// Graceful shutdown (UNCHANGED)
+// Graceful shutdown
 process.on('SIGINT', () => {
   pnlLogger.logMetrics({
     message: `🛑 Shutting down | ${totalTrades} trades, ${totalProfit.toFixed(3)} SOL profit, ${cycleCount} cycles`,
@@ -276,7 +272,7 @@ process.on('SIGINT', () => {
   process.exit(0);
 });
 
-// Start the bot (UNCHANGED)
+// Start the bot
 runBot().catch((err: unknown) => {
   pnlLogger.logError(err as Error, { message: 'Fatal error in bot startup' });
   process.exit(1);
