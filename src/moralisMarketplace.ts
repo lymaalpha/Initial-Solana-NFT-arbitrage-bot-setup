@@ -1,269 +1,137 @@
-// src/moralisMarketplace.ts - ✅ FIXED: Syntax errors + REAL DATA ONLY
+// src/moralisMarketplace.ts - ✅ FIXED: ME V2 + Rate Limit Backoff
 import axios from 'axios';
 import BN from 'bn.js';
 import { NFTListing, NFTBid } from './types';
-import { config } from './config';
 import { pnlLogger } from './pnlLogger';
 
-const MORALIS_API_KEY = config.moralisApiKey;
-const SOLANA_GATEWAY_URL = 'https://solana-gateway.moralis.io/nft/mainnet';
+const ME_V2_URL = 'https://api-mainnet.magiceden.dev/v2';
+let rateLimitBackoff = 1000; // Start with 1s
 
-// Axios instances
-const moralisApi = axios.create({
-  baseURL: SOLANA_GATEWAY_URL,
-  headers: {
-    'X-API-Key': MORALIS_API_KEY,
-    'accept': 'application/json',
-  },
-  timeout: 10000,
-});
+async function rateLimitDelay(): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, rateLimitBackoff));
+}
 
-const MAGIC_EDEN_V2_URL = 'https://api-mainnet.magiceden.dev/v2';
-
-export async function fetchListings(collectionMint: string): Promise<NFTListing[]> {
-  if (!MORALIS_API_KEY) {
-    pnlLogger.logError(new Error('MORALIS_API_KEY missing'), { 
-      source: 'Moralis', 
-      collection: collectionMint 
-    });
-    return [];
-  }
-
+// ✅ Use collection SYMBOLS (from main.ts)
+export async function fetchListings(collectionSymbol: string): Promise<NFTListing[]> {
   const listings: NFTListing[] = [];
   const now = Date.now();
 
   try {
-    // ✅ REAL #1: Validate collection exists
-    try {
-      await moralisApi.get(`/${collectionMint}/metadata?mediaItems=false`);
-    } catch (metadataErr: any) {
-      if (metadataErr.response?.status === 404) {
-        pnlLogger.logMetrics({
-          message: `⚠️ Collection not found: ${collectionMint}`,
-          source: 'Moralis'
-        });
-        return [];
-      }
-      throw metadataErr;
-    }
+    await rateLimitDelay();
 
-    // ✅ REAL #2: Magic Eden V2 Public API - Recent listings
-    try {
-      const response = await axios.get(
-        `${MAGIC_EDEN_V2_URL}/collections/${collectionMint}/listings?offset=0&limit=30`
-      );
-      
-      if (response.data && Array.isArray(response.data)) {
-        for (const listing of response.data) {
-          if (listing.price && listing.tokenMint) {
-            const priceLamports = new BN(listing.price); // Already in lamports
-            
-            listings.push({
-              mint: listing.tokenMint,
-              auctionHouse: 'moralis',
-              price: priceLamports,
-              currency: 'SOL',
-              timestamp: now,
-              sellerPubkey: listing.seller || '',
-            });
-          }
+    // ME V2: Collection activities (recent listings)
+    const activitiesResponse = await axios.get(
+      `${ME_V2_URL}/collections/${collectionSymbol}/activities?offset=0&limit=50`,
+      { timeout: 8000 }
+    );
+
+    if (activitiesResponse.data) {
+      for (const activity of activitiesResponse.data) {
+        // Filter for listings
+        if (activity.type === 'list' && activity.tokenMint && activity.price) {
+          listings.push({
+            mint: activity.tokenMint,
+            auctionHouse: 'moralis',
+            price: new BN(activity.price),
+            currency: 'SOL',
+            timestamp: now,
+            sellerPubkey: activity.userAddress || ''
+          });
         }
       }
-    } catch (meErr: any) {
-      pnlLogger.logMetrics({
-        message: `⚠️ Magic Eden listings fetch failed (using fallback)`,
-        collection: collectionMint,
-        source: 'MagicEden V2',
-        error: meErr.response?.status || meErr.message
-      });
     }
 
-    // ✅ REAL #3: Fallback - Collection floor price proxy from recent sales
-    try {
-      const activitiesResponse = await axios.get(
-        `${MAGIC_EDEN_V2_URL}/collections/${collectionMint}/activities?offset=0&limit=20`
-      );
-      
-      if (activitiesResponse.data && Array.isArray(activitiesResponse.data)) {
-        for (const activity of activitiesResponse.data) {
-          // Use recent sale prices as "listing price" proxy
-          if (activity.type === 'sale' && activity.price && activity.tokenMint) {
-            const priceLamports = new BN(activity.price);
-            
-            if (!listings.some(l => l.mint === activity.tokenMint)) {
-              listings.push({
-                mint: activity.tokenMint,
-                auctionHouse: 'moralis',
-                price: priceLamports,
-                currency: 'SOL',
-                timestamp: now,
-                sellerPubkey: activity.seller || '',
-              });
-            }
-          }
-        }
-      }
-    } catch (activityErr: any) {
-      pnlLogger.logMetrics({
-        message: `⚠️ ME activities fetch failed (continuing)`,
-        collection: collectionMint,
-        source: 'MagicEden Activities',
-        error: activityErr.message
-      });
-    }
-
-    // ✅ FIXED: Calculate price range WITHOUT Math.min/max syntax errors
-    let minPriceSOL = Infinity;
-    let maxPriceSOL = 0;
-    
-    for (const listing of listings) {
-      const priceSOL = listing.price.toNumber() / 1e9;
-      if (priceSOL < minPriceSOL) minPriceSOL = priceSOL;
-      if (priceSOL > maxPriceSOL) maxPriceSOL = priceSOL;
-    }
-
-    const uniqueListings = listings.filter((listing, index, self) => 
-      index === self.findIndex(l => l.mint === listing.mint)
+    // Dedupe by mint
+    const uniqueListings = listings.filter((l, i, self) => 
+      i === self.findIndex(l2 => l2.mint === l.mint)
     );
 
     pnlLogger.logMetrics({
-      message: `✅ Moralis listings fetched (REAL DATA)`,
-      collection: collectionMint,
+      message: `✅ Moralis listings (ME V2 activities)`,
+      collection: collectionSymbol,
       count: uniqueListings.length,
-      sources: {
-        magicEdenListings: listings.length,
-        afterDeduplication: uniqueListings.length
-      },
-      priceRangeSOL: uniqueListings.length > 0 
-        ? `${minPriceSOL.toFixed(2)}-${maxPriceSOL.toFixed(2)} SOL`
-        : 'N/A'
+      backoffMs: rateLimitBackoff
     });
 
-    return uniqueListings.slice(0, 25);
+    return uniqueListings.slice(0, 20);
 
   } catch (err: any) {
-    pnlLogger.logError(err as Error, {
-      message: `❌ Moralis fetchListings failed`,
-      collection: collectionMint,
-      source: 'Moralis + ME V2',
-      statusCode: err.response?.status,
-      error: err.message,
+    if (err.response?.status === 429) {
+      rateLimitBackoff = Math.min(rateLimitBackoff * 2, 10000);
+      pnlLogger.logMetrics({
+        message: `🔄 Rate limited, backoff ${rateLimitBackoff}ms`,
+        collection: collectionSymbol
+      });
+    }
+    
+    pnlLogger.logMetrics({
+      message: `⚠️ Moralis listings failed`,
+      collection: collectionSymbol,
+      error: err.response?.status || err.message
     });
     return [];
   }
 }
 
-export async function fetchBids(collectionMint: string): Promise<NFTBid[]> {
+export async function fetchBids(collectionSymbol: string): Promise<NFTBid[]> {
   const bids: NFTBid[] = [];
   const now = Date.now();
 
   try {
-    // ✅ REAL #1: Magic Eden V2 - Recent buyer activity (proxy for bids)
-    try {
-      const response = await axios.get(
-        `${MAGIC_EDEN_V2_URL}/collections/${collectionMint}/activities?offset=0&limit=30`
-      );
-      
-      if (response.data && Array.isArray(response.data)) {
-        for (const activity of response.data) {
-          // Use recent purchases as "bid" proxy (buyers willing to pay this price)
-          if (activity.type === 'sale' && activity.price && activity.tokenMint) {
-            const priceLamports = new BN(activity.price);
-            
-            bids.push({
-              mint: activity.tokenMint || collectionMint,
-              auctionHouse: 'moralis',
-              price: priceLamports,
-              currency: 'SOL',
-              timestamp: now,
-              bidderPubkey: activity.buyer || `buyer_${Math.random().toString(36).substr(2, 8)}`,
-            });
-          }
-        }
-      }
-    } catch (meErr: any) {
-      pnlLogger.logMetrics({
-        message: `⚠️ ME bids proxy fetch failed (continuing)`,
-        collection: collectionMint,
-        source: 'MagicEden V2',
-        error: meErr.response?.status || meErr.message
-      });
-    }
+    await rateLimitDelay();
 
-    // ✅ REAL #2: Collection floor + premium bids
-    try {
-      const floorResponse = await axios.get(
-        `${MAGIC_EDEN_V2_URL}/collections/${collectionMint}`
-      );
-      
-      if (floorResponse.data && floorResponse.data.floorPrice) {
-        const floorPrice = new BN(floorResponse.data.floorPrice);
-        
-        // Generate realistic bids around floor (real market behavior)
-        const bidVariations = [0.95, 0.98, 1.02, 1.05, 1.08]; // -5% to +8%
-        
-        for (const variation of bidVariations) {
-          const bidPrice = floorPrice.mul(new BN(Math.round(variation * 100))).div(new BN(100));
-          
+    // ME V2: Recent sales as bid proxy
+    const activitiesResponse = await axios.get(
+      `${ME_V2_URL}/collections/${collectionSymbol}/activities?offset=0&limit=30`,
+      { timeout: 8000 }
+    );
+
+    if (activitiesResponse.data) {
+      for (const activity of activitiesResponse.data) {
+        // Use sales as "bids" (buyers willing to pay)
+        if (activity.type === 'sale' && activity.tokenMint && activity.price) {
           bids.push({
-            mint: collectionMint,
+            mint: activity.tokenMint || collectionSymbol,
             auctionHouse: 'moralis',
-            price: bidPrice,
+            price: new BN(activity.price),
             currency: 'SOL',
             timestamp: now,
-            bidderPubkey: `moralis_bidder_${variation}_${Date.now()}`,
+            bidderPubkey: activity.userAddress || ''
           });
         }
       }
-    } catch (floorErr: any) {
-      pnlLogger.logMetrics({
-        message: `⚠️ ME floor fetch failed (continuing)`,
-        collection: collectionMint,
-        source: 'MagicEden Floor',
-        error: floorErr.message
-      });
     }
 
-    // Deduplicate and sort by price DESC
-    const uniqueBids = bids
-      .filter((bid, index, self) => 
-        index === self.findIndex(b => b.mint === bid.mint && b.auctionHouse === bid.auctionHouse)
-      )
-      .sort((a, b) => b.price.sub(a.price).toNumber());
-
-    // ✅ FIXED: Calculate top bid without syntax errors
-    const topBidSOL = uniqueBids.length > 0 ? (uniqueBids[0].price.toNumber() / 1e9).toFixed(2) : 'N/A';
+    // Sort highest first
+    bids.sort((a, b) => b.price.sub(a.price).toNumber());
 
     pnlLogger.logMetrics({
-      message: `✅ Moralis bids fetched (REAL DATA)`,
-      collection: collectionMint,
-      count: uniqueBids.length,
-      topBidSOL,
-      sources: {
-        magicEdenPurchases: bids.length,
-        floorBids: 5 // Fixed variations
-      }
+      message: `✅ Moralis bids (ME V2 sales)`,
+      collection: collectionSymbol,
+      count: bids.length,
+      topBidSOL: bids.length > 0 ? (bids[0].price.toNumber() / 1e9).toFixed(2) : 'N/A'
     });
 
-    return uniqueBids.slice(0, 15);
+    return bids.slice(0, 12);
 
   } catch (err: any) {
-    pnlLogger.logError(err as Error, {
-      message: `❌ Moralis fetchBids failed`,
-      collection: collectionMint,
-      source: 'Moralis + ME V2',
-      error: err.message,
+    if (err.response?.status === 429) {
+      rateLimitBackoff = Math.min(rateLimitBackoff * 2, 10000);
+    }
+    
+    pnlLogger.logMetrics({
+      message: `⚠️ Moralis bids failed`,
+      collection: collectionSymbol,
+      error: err.response?.status || err.message
     });
     return [];
   }
 }
 
 export async function healthCheck(): Promise<boolean> {
-  if (!MORALIS_API_KEY) return false;
-  
   try {
-    const response = await moralisApi.get('/So11111111111111111111111111111111111111112/metadata?mediaItems=false');
-    return response.status === 200;
+    await axios.get(`${ME_V2_URL}/collections/mad_lads`, { timeout: 5000 });
+    return true;
   } catch {
     return false;
   }
