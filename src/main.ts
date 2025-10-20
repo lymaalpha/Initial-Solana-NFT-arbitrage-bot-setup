@@ -1,4 +1,4 @@
-// src/main.ts - ✅ Patched: MagicEden + Rarible
+// src/main.ts - ✅ SIMPLIFIED: MagicEden + Rarible ONLY
 import { scanForArbitrage } from "./scanForArbitrage";
 import { executeBatch } from "./autoFlashloanExecutor";
 import { pnlLogger } from "./pnlLogger";
@@ -20,7 +20,6 @@ const COLLECTIONS = [
   { name: "DeGods", magicEden: "degods-club", rarible: "6XxjKYFbcndh2gDcsUrmZgVEsoDxXMnfsaGY6fpTJzNr" },
 ];
 
-// ✅ Type-safe generic safeFetch
 async function safeFetch<T>(
   fn: () => Promise<T[]>,
   source: string,
@@ -29,7 +28,7 @@ async function safeFetch<T>(
 ): Promise<T[]> {
   const start = Date.now();
   try {
-    const result: T[] = await fn();
+    const result = await fn();
     pnlLogger.logMetrics({
       message: `✅ ${source} ${type} fetched for ${collection}`,
       count: result.length,
@@ -37,10 +36,8 @@ async function safeFetch<T>(
     });
     return result;
   } catch (err: unknown) {
-    pnlLogger.logError(
-      err instanceof Error ? err : new Error(String(err)),
-      { message: `❌ ${source} ${type} failed for ${collection}` }
-    );
+    const error = err as Error;
+    pnlLogger.logError(error, { message: `❌ ${source} ${type} failed for ${collection}` });
     return [];
   }
 }
@@ -59,6 +56,7 @@ async function runBot() {
 
     for (const c of COLLECTIONS) {
       try {
+        // ✅ Explicit type-casts fix unknown[] errors
         const [meListings, raribleListings] = await Promise.all([
           safeFetch<NFTListing>(() => MagicEdenAPI.fetchListings(c.magicEden), "MagicEden", c.name, "listings"),
           safeFetch<NFTListing>(() => RaribleAPI.fetchListings(c.rarible), "Rarible", c.name, "listings"),
@@ -84,10 +82,8 @@ async function runBot() {
           allSignals = allSignals.concat(signals);
         }
       } catch (err: unknown) {
-        pnlLogger.logError(
-          err instanceof Error ? err : new Error(String(err)),
-          { message: `Error on ${c.name}` }
-        );
+        const error = err as Error;
+        pnlLogger.logError(error, { message: `Error on ${c.name}` });
       }
     }
 
@@ -102,47 +98,50 @@ async function runBot() {
       for (const sig of profitable) {
         const profit = sig.estimatedNetProfit.toNumber() / 1e9;
         pnlLogger.logMetrics({
-          message: `💰 ${sig.targetListing.auctionHouse} → ${sig.targetBid.auctionHouse}`,
-          profitSOL: profit,
+          message: `💰 Trade ${sig.targetListing.mint.substring(0, 8)}: ${profit.toFixed(4)} SOL`,
+          mint: sig.targetListing.mint,
+          profit: profit,
         });
-      }
 
-      if (!config.simulateOnly) {
-        const trades = await executeBatch(profitable);
-        trades.forEach((t) => {
-          if (t) {
+        if (!config.simulateOnly) {
+          const tradeLog = await executeBatch([sig]);
+          if (tradeLog[0]) {
             totalTrades++;
-            const p = t.netProfit.toNumber() / 1e9;
-            totalProfit += p;
+            totalProfit += profit;
+            pnlLogger.logMetrics({
+              message: `✅ Executed ${sig.targetListing.mint.substring(0, 8)}`,
+              totalProfit: totalProfit,
+              totalTrades: totalTrades,
+            });
+          } else {
+            pnlLogger.logMetrics({
+              message: `❌ Failed to execute ${sig.targetListing.mint.substring(0, 8)}`,
+            });
           }
-        });
+        }
       }
     } else {
-      pnlLogger.logMetrics({ message: "⚠️ No arbitrage opportunities this cycle." });
+      pnlLogger.logMetrics({ message: "⚡ No profitable signals in this scan." });
     }
 
     pnlLogger.logMetrics({
-      message: "✅ Cycle complete",
-      cycle: cycleCount,
-      time: (Date.now() - start) / 1000,
-      totalProfit,
-      totalItemsScanned: totalItems,
-      totalSignalsFound: allSignals.length,
+      message: "📈 Cycle complete",
+      cycleTime: (Date.now() - start) / 1000,
+      totalTrades: totalTrades,
+      totalProfit: totalProfit,
+      signalsFound: allSignals.length,
     });
 
-    await new Promise((r) => setTimeout(r, config.scanIntervalMs));
+    await new Promise((resolve) => setTimeout(resolve, config.scanIntervalMs));
   }
 }
 
-// Graceful shutdown
 process.on("SIGINT", () => {
-  pnlLogger.logMetrics({
-    message: `🛑 Shutdown: ${totalTrades} trades | ${totalProfit.toFixed(3)} SOL total`,
-  });
+  pnlLogger.logMetrics({ message: "🛑 Shutting down bot..." });
   process.exit(0);
 });
 
-runBot().catch((e: unknown) => {
-  pnlLogger.logError(e instanceof Error ? e : new Error(String(e)), { message: "Fatal error starting bot" });
+runBot().catch((err) => {
+  pnlLogger.logError(err as Error, { message: "Fatal error in bot" });
   process.exit(1);
 });
