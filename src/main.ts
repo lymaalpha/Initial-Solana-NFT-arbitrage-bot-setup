@@ -1,4 +1,4 @@
-// src/main.ts - ✅ SIMPLIFIED: MagicEden + Rarible
+// src/main.ts - ✅ Patched: MagicEden + Rarible
 import { scanForArbitrage } from "./scanForArbitrage";
 import { executeBatch } from "./autoFlashloanExecutor";
 import { pnlLogger } from "./pnlLogger";
@@ -20,6 +20,7 @@ const COLLECTIONS = [
   { name: "DeGods", magicEden: "degods-club", rarible: "6XxjKYFbcndh2gDcsUrmZgVEsoDxXMnfsaGY6fpTJzNr" },
 ];
 
+// ✅ Type-safe generic safeFetch
 async function safeFetch<T>(
   fn: () => Promise<T[]>,
   source: string,
@@ -28,7 +29,7 @@ async function safeFetch<T>(
 ): Promise<T[]> {
   const start = Date.now();
   try {
-    const result = await fn();
+    const result: T[] = await fn();
     pnlLogger.logMetrics({
       message: `✅ ${source} ${type} fetched for ${collection}`,
       count: result.length,
@@ -36,8 +37,10 @@ async function safeFetch<T>(
     });
     return result;
   } catch (err: unknown) {
-    const error = err as Error;
-    pnlLogger.logError(error, { message: `❌ ${source} ${type} failed for ${collection}` });
+    pnlLogger.logError(
+      err instanceof Error ? err : new Error(String(err)),
+      { message: `❌ ${source} ${type} failed for ${collection}` }
+    );
     return [];
   }
 }
@@ -56,7 +59,6 @@ async function runBot() {
 
     for (const c of COLLECTIONS) {
       try {
-        // ✅ Explicit type-casts fix unknown[] errors
         const [meListings, raribleListings] = await Promise.all([
           safeFetch<NFTListing>(() => MagicEdenAPI.fetchListings(c.magicEden), "MagicEden", c.name, "listings"),
           safeFetch<NFTListing>(() => RaribleAPI.fetchListings(c.rarible), "Rarible", c.name, "listings"),
@@ -82,8 +84,10 @@ async function runBot() {
           allSignals = allSignals.concat(signals);
         }
       } catch (err: unknown) {
-        const error = err as Error;
-        pnlLogger.logError(error, { message: `Error on ${c.name}` });
+        pnlLogger.logError(
+          err instanceof Error ? err : new Error(String(err)),
+          { message: `Error on ${c.name}` }
+        );
       }
     }
 
@@ -122,12 +126,15 @@ async function runBot() {
       cycle: cycleCount,
       time: (Date.now() - start) / 1000,
       totalProfit,
+      totalItemsScanned: totalItems,
+      totalSignalsFound: allSignals.length,
     });
 
     await new Promise((r) => setTimeout(r, config.scanIntervalMs));
   }
 }
 
+// Graceful shutdown
 process.on("SIGINT", () => {
   pnlLogger.logMetrics({
     message: `🛑 Shutdown: ${totalTrades} trades | ${totalProfit.toFixed(3)} SOL total`,
@@ -136,7 +143,6 @@ process.on("SIGINT", () => {
 });
 
 runBot().catch((e: unknown) => {
-  const error = e as Error;
-  pnlLogger.logError(error, { message: "Fatal error starting bot" });
+  pnlLogger.logError(e instanceof Error ? e : new Error(String(e)), { message: "Fatal error starting bot" });
   process.exit(1);
 });
