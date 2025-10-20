@@ -15,7 +15,7 @@ export interface BotConfig {
   heliusApiKey: string;
   tensorApiKey: string;
   openseaApiKey: string;
-  simpleHashApiKey: string; // <-- 1. ADD TO INTERFACE
+  moralisApiKey: string; // ✅ CHANGED: simpleHashApiKey → moralisApiKey
   collections: string[];
   marketplaces: string[];
   minProfitLamports: BN;
@@ -38,7 +38,7 @@ function parseNumber(value: string | undefined, defaultValue: number, name: stri
 }
 
 function validateConfig(): BotConfig {
-  const requiredVars = ['RPC_URL', 'PRIVATE_KEY'];
+  const requiredVars = ['RPC_URL', 'PRIVATE_KEY', 'MORALIS_API_KEY']; // ✅ ADDED: MORALIS_API_KEY as required
   const missing = requiredVars.filter(varName => !process.env[varName]);
 
   if (missing.length > 0) {
@@ -53,7 +53,7 @@ function validateConfig(): BotConfig {
     heliusApiKey: process.env.HELIUS_API_KEY || "",
     tensorApiKey: process.env.TENSOR_API_KEY || "",
     openseaApiKey: process.env.OPENSEA_API_KEY || "",
-    simpleHashApiKey: process.env.SIMPLEHASH_API_KEY || "", // <-- 2. ADD TO RETURNED OBJECT
+    moralisApiKey: process.env.MORALIS_API_KEY || "", // ✅ CHANGED: SIMPLEHASH_API_KEY → MORALIS_API_KEY
     collections: getEnvList("COLLECTION_MINTS"),
     marketplaces: getEnvList("MARKETPLACES"),
     minProfitLamports: new BN(parseNumber(process.env.MIN_PROFIT_SOL, 0.01, 'MIN_PROFIT_SOL') * 1e9),
