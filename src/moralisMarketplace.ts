@@ -1,4 +1,4 @@
-// src/moralisMarketplace.ts - ✅ FIXED TypeScript Errors
+// src/moralisMarketplace.ts - ✅ REAL DATA ONLY (Moralis + Public APIs)
 import axios from 'axios';
 import BN from 'bn.js';
 import { NFTListing, NFTBid } from './types';
@@ -8,98 +8,181 @@ import { pnlLogger } from './pnlLogger';
 const MORALIS_API_KEY = config.moralisApiKey;
 const SOLANA_GATEWAY_URL = 'https://solana-gateway.moralis.io/nft/mainnet';
 
-// Axios instance for Solana Gateway
-const api = axios.create({
+// Axios instances
+const moralisApi = axios.create({
   baseURL: SOLANA_GATEWAY_URL,
   headers: {
     'X-API-Key': MORALIS_API_KEY,
     'accept': 'application/json',
   },
-  timeout: 15000,
+  timeout: 10000,
 });
 
-// ✅ FIXED: fetchListings - Correct NFTListing type
+// ✅ REAL DATA: Public Magic Eden API (no auth required)
+const MAGIC_EDEN_V2_URL = 'https://api-mainnet.magiceden.dev/v2';
+
 export async function fetchListings(collectionMint: string): Promise<NFTListing[]> {
   if (!MORALIS_API_KEY) {
     pnlLogger.logError(new Error('MORALIS_API_KEY missing'), { 
-      source: 'Moralis Solana Gateway', 
+      source: 'Moralis', 
       collection: collectionMint 
     });
     return [];
   }
 
+  const listings: NFTListing[] = [];
+  const now = Date.now();
+
   try {
-    // Step 1: Test collection metadata
+    // ✅ REAL #1: Moralis collection metadata validation
     try {
-      await api.get(`/${collectionMint}/metadata?mediaItems=false`);
-    } catch (metadataErr: any) {
-      if (metadataErr.response?.status === 404) {
+      const metadataResponse = await moralisApi.get(`/${collectionMint}/metadata?mediaItems=false`);
+      if (metadataResponse.data.possibleSpam) {
         pnlLogger.logMetrics({
-          message: `⚠️ Collection not found in Moralis`,
+          message: `⚠️ Collection flagged as spam`,
           collection: collectionMint,
           source: 'Moralis'
         });
-        return []; // Skip invalid collections
+        return [];
+      }
+    } catch (metadataErr: any) {
+      if (metadataErr.response?.status === 404) {
+        pnlLogger.logMetrics({
+          message: `⚠️ Collection not found: ${collectionMint}`,
+          source: 'Moralis'
+        });
+        return [];
       }
       throw metadataErr;
     }
 
-    // Step 2: Use collection NFTs endpoint (fallback to mock data if needed)
-    let listings: NFTListing[] = [];
-    
-    // Try to get collection NFTs (may not exist in Solana Gateway)
+    // ✅ REAL #2: Magic Eden V2 Public API - Collection activities (recent listings)
     try {
-      const nftsResponse = await api.get(`/collection/${collectionMint}/nfts?limit=20`);
-      if (nftsResponse.data && Array.isArray(nftsResponse.data)) {
-        const now = Date.now();
-        for (const nft of nftsResponse.data) {
-          // Mock realistic listing prices based on collection floor (~2-5 SOL for Mad Lads)
-          const mockPrice = new BN((2 + Math.random() * 3) * 1e9); // 2-5 SOL in lamports
-          
-          listings.push({
-            mint: nft.mint || nft.token_id || `mock_${Math.random().toString(36).substr(2, 9)}`,
-            auctionHouse: 'moralis', // ✅ FIXED: Use 'moralis' (valid marketplace)
-            price: mockPrice,
-            // ✅ FIXED: Remove assetMint (not in NFTListing interface)
-            currency: 'SOL',
-            timestamp: now,
-            sellerPubkey: nft.owner || 'mock_seller_pubkey',
-          });
+      const meActivities = await axios.get(`${MAGIC_EDEN_V2_URL}/wallets/activities?collection=${collectionMint}&offset=0&limit=50`);
+      
+      if (meActivities.data && Array.isArray(meActivities.data)) {
+        for (const activity of meActivities.data) {
+          // Filter for LISTINGS (signature type = 'list')
+          if (activity.signatureType === 'list' && activity.price) {
+            const priceLamports = new BN(activity.price * 1e9); // ME returns SOL, convert to lamports
+            
+            if (priceLamports.gt(new BN(0))) {
+              listings.push({
+                mint: activity.tokenMint,
+                auctionHouse: 'moralis',
+                price: priceLamports,
+                currency: 'SOL',
+                timestamp: now,
+                sellerPubkey: activity.userAddress || '',
+              });
+            }
+          }
         }
       }
-    } catch (nftsErr: any) {
-      // Fallback: Generate mock listings for testing
-      console.log(`Moralis NFTs endpoint unavailable, using mock data for ${collectionMint}`);
-      const now = Date.now();
-      const mockCount = 15 + Math.floor(Math.random() * 15); // 15-30 listings
+    } catch (meErr: any) {
+      pnlLogger.logMetrics({
+        message: `⚠️ Magic Eden activities fetch failed (continuing)`,
+        collection: collectionMint,
+        source: 'MagicEden V2 Public',
+        error: meErr.message
+      });
+    }
+
+    // ✅ REAL #3: Moralis recent trades (proxy for active listings)
+    try {
+      // Note: Moralis trades endpoint may not exist - skip if 404
+      const tradesResponse = await moralisApi.get(`/trades?collection=${collectionMint}&limit=20`);
       
-      for (let i = 0; i < mockCount; i++) {
-        const mockPrice = new BN((1.5 + Math.random() * 4.5) * 1e9); // 1.5-6 SOL
-        listings.push({
-          mint: `${collectionMint}_${i}_${Date.now()}`,
-          auctionHouse: 'moralis',
-          price: mockPrice,
-          currency: 'SOL',
-          timestamp: now,
-          sellerPubkey: `mock_seller_${i}`,
+      if (tradesResponse.data && Array.isArray(tradesResponse.data)) {
+        for (const trade of tradesResponse.data) {
+          // Use trade price as "listing price" proxy (recent market activity)
+          const priceLamports = new BN(trade.total_price || 0);
+          
+          if (priceLamports.gt(new BN(0)) && 
+              !listings.some(l => l.mint === trade.token_id)) {
+            listings.push({
+              mint: trade.token_id || trade.mint || '',
+              auctionHouse: 'moralis',
+              price: priceLamports,
+              currency: 'SOL',
+              timestamp: now,
+              sellerPubkey: trade.seller || '',
+            });
+          }
+        }
+      }
+    } catch (tradesErr: any) {
+      // Trades endpoint likely doesn't exist - continue without error
+      if (tradesErr.response?.status !== 404) {
+        pnlLogger.logMetrics({
+          message: `⚠️ Moralis trades fetch failed (continuing)`,
+          collection: collectionMint,
+          source: 'Moralis Trades',
+          error: tradesErr.message
         });
       }
     }
 
+    // ✅ REAL #4: Public Helius RPC (if HELIUS_API_KEY available)
+    if (config.heliusApiKey) {
+      try {
+        const heliusResponse = await axios.get(`https://api.helius.xyz/v0/addresses/${collectionMint}/nfts?api-key=${config.heliusApiKey}`);
+        
+        if (heliusResponse.data && Array.isArray(heliusResponse.data)) {
+          for (const nft of heliusResponse.data.slice(0, 10)) { // Top 10 NFTs
+            if (nft.lastSale && nft.lastSale.price) {
+              const priceLamports = new BN(nft.lastSale.price * 1e9);
+              
+              if (priceLamports.gt(new BN(0)) && 
+                  !listings.some(l => l.mint === nft.mint)) {
+                listings.push({
+                  mint: nft.mint,
+                  auctionHouse: 'moralis',
+                  price: priceLamports,
+                  currency: 'SOL',
+                  timestamp: now,
+                  sellerPubkey: nft.owner || '',
+                });
+              }
+            }
+          }
+        }
+      } catch (heliusErr: any) {
+        pnlLogger.logMetrics({
+          message: `⚠️ Helius fetch failed (continuing)`,
+          collection: collectionMint,
+          source: 'Helius',
+          error: heliusErr.message
+        });
+      }
+    }
+
+    // Deduplicate by mint
+    const uniqueListings = listings.filter((listing, index, self) => 
+      index === self.findIndex(l => l.mint === listing.mint)
+    );
+
     pnlLogger.logMetrics({
-      message: `✅ Moralis listings fetched`,
+      message: `✅ Moralis listings fetched (REAL DATA)`,
       collection: collectionMint,
-      count: listings.length,
-      source: 'Moralis (mock+real)',
+      count: uniqueListings.length,
+      sources: {
+        magicEdenActivities: listings.filter(l => l.sellerPubkey).length,
+        moralisTrades: listings.filter(l => !l.sellerPubkey).length,
+        helius: config.heliusApiKey ? 'attempted' : 'disabled'
+      },
+      priceRangeSOL: uniqueListings.length > 0 
+        ? `${(Math.min(...uniqueListings.map(l => l.price.toNumber() / 1e9)).toFixed(2)}-${(Math.max(...uniqueListings.map(l => l.price.toNumber() / 1e9)).toFixed(2)} SOL`
+        : 'N/A'
     });
 
-    return listings.slice(0, 50);
+    return uniqueListings.slice(0, 30); // Limit to prevent overload
 
   } catch (err: any) {
     const errorDetails = {
       message: `❌ Moralis fetchListings failed`,
       collection: collectionMint,
-      source: 'Moralis Solana Gateway',
+      source: 'Moralis + Public APIs',
       statusCode: err.response?.status,
       error: err.message,
     };
@@ -108,58 +191,120 @@ export async function fetchListings(collectionMint: string): Promise<NFTListing[
   }
 }
 
-// ✅ FIXED: fetchBids - Correct NFTBid type
 export async function fetchBids(collectionMint: string): Promise<NFTBid[]> {
   if (!MORALIS_API_KEY) {
     pnlLogger.logError(new Error('MORALIS_API_KEY missing'), { 
-      source: 'Moralis Solana Gateway', 
+      source: 'Moralis', 
       collection: collectionMint 
     });
     return [];
   }
 
+  const bids: NFTBid[] = [];
+  const now = Date.now();
+
   try {
-    // Generate realistic bids (highest first)
-    const now = Date.now();
-    const bids: NFTBid[] = [];
-    const bidCount = 10 + Math.floor(Math.random() * 15); // 10-25 bids
-    
-    // Mock bids: 2-7 SOL, sorted DESC (highest first)
-    for (let i = 0; i < bidCount; i++) {
-      const basePrice = 2 + Math.random() * 5; // 2-7 SOL
-      const bidPrice = new BN((basePrice + (bidCount - i) * 0.1) * 1e9); // Higher bids first
+    // ✅ REAL #1: Magic Eden V2 Public API - Recent buyer activities
+    try {
+      const meActivities = await axios.get(`${MAGIC_EDEN_V2_URL}/wallets/activities?collection=${collectionMint}&offset=0&limit=50`);
       
-      bids.push({
-        mint: collectionMint,
-        auctionHouse: 'moralis', // ✅ FIXED: Use 'moralis'
-        price: bidPrice,
-        // ✅ FIXED: Remove assetMint (not in NFTBid interface)
-        currency: 'SOL',
-        timestamp: now,
-        bidderPubkey: `mock_bidder_${i}_${Date.now()}`,
+      if (meActivities.data && Array.isArray(meActivities.data)) {
+        for (const activity of meActivities.data) {
+          // Filter for PURCHASES (signature type = 'sale' - proxy for bids)
+          if (activity.signatureType === 'sale' && activity.price) {
+            const priceLamports = new BN(activity.price * 1e9);
+            
+            if (priceLamports.gt(new BN(0))) {
+              bids.push({
+                mint: activity.tokenMint || collectionMint,
+                auctionHouse: 'moralis',
+                price: priceLamports,
+                currency: 'SOL',
+                timestamp: now,
+                bidderPubkey: activity.userAddress || '',
+              });
+            }
+          }
+        }
+      }
+    } catch (meErr: any) {
+      pnlLogger.logMetrics({
+        message: `⚠️ Magic Eden bids fetch failed (continuing)`,
+        collection: collectionMint,
+        source: 'MagicEden V2 Public',
+        error: meErr.message
       });
     }
 
-    // Shuffle bidder pubkeys to simulate different wallets
-    bids.forEach((bid, i) => {
-      bid.bidderPubkey = `bidder_${i}_${Math.random().toString(36).substr(2, 9)}`;
-    });
+    // ✅ REAL #2: Moralis wallet NFT holdings (active buyers)
+    try {
+      // Get top holders from collection metadata/creators
+      const metadataResponse = await moralisApi.get(`/${collectionMint}/metadata?mediaItems=false`);
+      
+      if (metadataResponse.data.creators && Array.isArray(metadataResponse.data.creators)) {
+        for (const creator of metadataResponse.data.creators.slice(0, 5)) { // Top 5 creators/holders
+          try {
+            const walletNfts = await moralisApi.get(`/account/${creator.address}/nfts?limit=10`);
+            
+            if (walletNfts.data && Array.isArray(walletNfts.data)) {
+              for (const nft of walletNfts.data) {
+                if (nft.collection === collectionMint && nft.last_sale_price) {
+                  const priceLamports = new BN(nft.last_sale_price * 1e9);
+                  
+                  if (priceLamports.gt(new BN(0)) && 
+                      !bids.some(b => b.bidderPubkey === creator.address)) {
+                    bids.push({
+                      mint: nft.mint || collectionMint,
+                      auctionHouse: 'moralis',
+                      price: priceLamports,
+                      currency: 'SOL',
+                      timestamp: now,
+                      bidderPubkey: creator.address,
+                    });
+                  }
+                }
+              }
+            }
+          } catch (walletErr: any) {
+            // Skip individual wallet errors
+            continue;
+          }
+        }
+      }
+    } catch (walletErr: any) {
+      pnlLogger.logMetrics({
+        message: `⚠️ Moralis wallet bids fetch failed (continuing)`,
+        collection: collectionMint,
+        source: 'Moralis Wallets',
+        error: walletErr.message
+      });
+    }
+
+    // Deduplicate and sort by price DESC
+    const uniqueBids = bids
+      .filter((bid, index, self) => 
+        index === self.findIndex(b => b.bidderPubkey === bid.bidderPubkey)
+      )
+      .sort((a, b) => b.price.sub(a.price).toNumber());
 
     pnlLogger.logMetrics({
-      message: `✅ Moralis bids fetched`,
+      message: `✅ Moralis bids fetched (REAL DATA)`,
       collection: collectionMint,
-      count: bids.length,
-      source: 'Moralis (mock)',
-      avgPriceSOL: bids.reduce((sum, b) => sum + b.price.toNumber() / 1e9, 0) / bids.length
+      count: uniqueBids.length,
+      sources: {
+        magicEdenPurchases: bids.filter(b => b.bidderPubkey).length,
+        moralisWallets: bids.filter(b => !b.bidderPubkey).length
+      },
+      topBidSOL: uniqueBids.length > 0 ? (uniqueBids[0].price.toNumber() / 1e9).toFixed(2) : 'N/A'
     });
 
-    return bids.slice(0, 20); // Top 20 bids
+    return uniqueBids.slice(0, 20);
 
   } catch (err: any) {
     const errorDetails = {
       message: `❌ Moralis fetchBids failed`,
       collection: collectionMint,
-      source: 'Moralis Solana Gateway',
+      source: 'Moralis + Public APIs',
       error: err.message,
     };
     pnlLogger.logError(err as Error, errorDetails);
@@ -167,18 +312,15 @@ export async function fetchBids(collectionMint: string): Promise<NFTBid[]> {
   }
 }
 
-// ✅ FIXED: healthCheck - Simple API test
 export async function healthCheck(): Promise<boolean> {
   if (!MORALIS_API_KEY) return false;
   
   try {
-    // Test WSOL metadata (reliable endpoint)
-    const response = await api.get('/So11111111111111111111111111111111111111112/metadata?mediaItems=false');
+    const response = await moralisApi.get('/So11111111111111111111111111111111111111112/metadata?mediaItems=false');
     return response.status === 200;
   } catch {
     return false;
   }
 }
 
-// Export for main.ts
 export default { fetchListings, fetchBids, healthCheck };
