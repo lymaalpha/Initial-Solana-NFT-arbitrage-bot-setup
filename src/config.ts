@@ -1,21 +1,23 @@
 // src/config.ts
 import dotenv from "dotenv";
-import BN from 'bn.js';
+import BN from "bn.js";
 
 dotenv.config();
 
+/** Utility: split comma-separated env vars into clean string arrays */
 function getEnvList(key: string): string[] {
   const val = process.env[key];
-  return val ? val.split(",").map(v => v.trim()).filter(Boolean) : []; // Removed .toUpperCase() to preserve case for IDs
+  return val ? val.split(",").map(v => v.trim()).filter(Boolean) : [];
 }
 
+/** Configuration interface for the bot */
 export interface BotConfig {
   rpcUrl: string;
   walletPrivateKey: string;
   heliusApiKey: string;
   tensorApiKey: string;
   openseaApiKey: string;
-  moralisApiKey: string; // ✅ CHANGED: simpleHashApiKey → moralisApiKey
+  moralisApiKey: string;
   collections: string[];
   marketplaces: string[];
   minProfitLamports: BN;
@@ -29,6 +31,7 @@ export interface BotConfig {
   simulateOnly: boolean;
 }
 
+/** Safe number parsing with validation */
 function parseNumber(value: string | undefined, defaultValue: number, name: string): number {
   const num = parseFloat(value || defaultValue.toString());
   if (isNaN(num) || num < 0) {
@@ -37,34 +40,44 @@ function parseNumber(value: string | undefined, defaultValue: number, name: stri
   return num;
 }
 
+/** Validate and load configuration from environment */
 function validateConfig(): BotConfig {
-  const requiredVars = ['RPC_URL', 'PRIVATE_KEY', 'MORALIS_API_KEY']; // ✅ ADDED: MORALIS_API_KEY as required
-  const missing = requiredVars.filter(varName => !process.env[varName]);
+  const requiredVars = ["RPC_URL", "PRIVATE_KEY"];
+  const missing = requiredVars.filter((v) => !process.env[v]);
+  if (missing.length > 0) throw new Error(`Missing required env vars: ${missing.join(", ")}`);
 
-  if (missing.length > 0) {
-    throw new Error(`Missing required env vars: ${missing.join(', ')}`);
-  }
-
-  console.log('Config loaded successfully');
+  console.log("✅ Config loaded successfully");
 
   return {
     rpcUrl: process.env.RPC_URL!,
     walletPrivateKey: process.env.PRIVATE_KEY!,
+
+    // Optional APIs
     heliusApiKey: process.env.HELIUS_API_KEY || "",
     tensorApiKey: process.env.TENSOR_API_KEY || "",
     openseaApiKey: process.env.OPENSEA_API_KEY || "",
-    moralisApiKey: process.env.MORALIS_API_KEY || "", // ✅ CHANGED: SIMPLEHASH_API_KEY → MORALIS_API_KEY
+    moralisApiKey: process.env.MORALIS_API_KEY || "",
+
+    // Data lists
     collections: getEnvList("COLLECTION_MINTS"),
     marketplaces: getEnvList("MARKETPLACES"),
-    minProfitLamports: new BN(parseNumber(process.env.MIN_PROFIT_SOL, 0.01, 'MIN_PROFIT_SOL') * 1e9),
-    feeBufferLamports: new BN(parseNumber(process.env.FEE_BUFFER_SOL, 0.002, 'FEE_BUFFER_SOL') * 1e9),
-    scanIntervalMs: parseNumber(process.env.SCAN_INTERVAL_MS, 10000, 'SCAN_INTERVAL_MS'),
-    maxConcurrentTrades: parseInt(process.env.MAX_CONCURRENT_TRADES || '3', 10),
-    minSignals: parseInt(process.env.MIN_SIGNALS || '1', 10),
+
+    // Core numeric config
+    minProfitLamports: new BN(parseNumber(process.env.MIN_PROFIT_SOL, 0.01, "MIN_PROFIT_SOL") * 1e9),
+    feeBufferLamports: new BN(parseNumber(process.env.FEE_BUFFER_SOL, 0.002, "FEE_BUFFER_SOL") * 1e9),
+    scanIntervalMs: parseNumber(process.env.SCAN_INTERVAL_MS, 10000, "SCAN_INTERVAL_MS"),
+
+    // Control flow
+    maxConcurrentTrades: parseInt(process.env.MAX_CONCURRENT_TRADES || "3", 10),
+    minSignals: parseInt(process.env.MIN_SIGNALS || "1", 10),
+
+    // Logging
     enableJsonLogging: process.env.ENABLE_JSON_LOGGING === "true",
     enableCsvLogging: process.env.ENABLE_CSV_LOGGING === "true",
     logLevel: process.env.LOG_LEVEL || "info",
-    simulateOnly: process.env.SIMULATE_ONLY === 'true',
+
+    // Mode
+    simulateOnly: process.env.SIMULATE_ONLY === "true",
   };
 }
 
