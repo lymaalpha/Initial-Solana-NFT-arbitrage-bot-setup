@@ -1,21 +1,26 @@
 import BN from 'bn.js';
 
-export type AuctionHouse = 'Tensor';
+export type AuctionHouse = 'MagicEden' | 'Tensor' | 'moralis'; // ✅ FIXED: Added ALL marketplaces
 export type Currency = 'SOL';
 export type ExecutorType = 'direct' | 'flash_loan';
 export type TradeType = 'signal' | 'executed' | 'failed';
 
 export interface NFTMarketData {
   mint: string;
-  auctionHouse: AuctionHouse;
+  auctionHouse: AuctionHouse;  // ✅ Now supports MagicEden, Tensor, moralis
   price: BN;
   currency: Currency;
   timestamp?: number;
-  bidderPubkey?: string;
+  bidderPubkey?: string;       // ✅ Only for bids
 }
 
-export interface NFTListing extends NFTMarketData {}
-export interface NFTBid extends NFTMarketData {}
+export interface NFTListing extends NFTMarketData {
+  sellerPubkey: string;        // ✅ Only for listings
+}
+
+export interface NFTBid extends NFTMarketData {
+  bidderPubkey: string;        // ✅ Required for bids
+}
 
 export interface ArbitrageSignal {
   targetListing: NFTListing;
@@ -36,4 +41,6 @@ export interface TradeLog {
   txSig?: string;
   type: TradeType;
   executorType?: ExecutorType;
+  buyAuctionHouse?: AuctionHouse;  // ✅ Added: Which marketplace bought from
+  sellAuctionHouse?: AuctionHouse; // ✅ Added: Which marketplace sold to
 }
