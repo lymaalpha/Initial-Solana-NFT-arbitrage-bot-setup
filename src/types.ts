@@ -1,6 +1,6 @@
 import BN from 'bn.js';
 
-export type AuctionHouse = 'MagicEden' | 'Tensor' | 'Rarible' | 'Moralis'; // ✅ FIXED: Added ALL marketplaces
+export type AuctionHouse = 'MagicEden' | 'Tensor' | 'Rarible' | 'moralis'; // ✅ FIXED: Added ALL marketplaces
 export type Currency = 'SOL';
 export type ExecutorType = 'direct' | 'flash_loan';
 export type TradeType = 'signal' | 'executed' | 'failed';
