@@ -2,36 +2,61 @@
   "compilerOptions": {
     "target": "ES2022",
     "module": "NodeNext",
-    "lib": ["ES2022", "dom", "dom.iterable"],
+    "lib": ["ES2022"],
     "outDir": "./dist",
     "rootDir": "./src",
     "strict": true,
     "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "resolveJsonModule": true,
+    "moduleResolution": "NodeNext",
+    
+    // Output settings
     "declaration": true,
     "declarationMap": true,
     "sourceMap": true,
     "removeComments": false,
+    
+    // Strict type checking
     "noImplicitAny": true,
     "strictNullChecks": true,
     "strictFunctionTypes": true,
     "noImplicitReturns": true,
     "noFallthroughCasesInSwitch": true,
-    "moduleResolution": "NodeNext",
-    "allowSyntheticDefaultImports": true,
-    // "experimentalDecorators": true,  // Uncomment if using decorators (e.g., in AI flows)
-    // "emitDecoratorMetadata": true,
-    "incremental": true,  // Faster rebuilds on Render
-    "composite": true     // Enables incremental + project refs
+    
+    // Build optimization
+    "incremental": true,
+    "composite": true,
+    "tsBuildInfoFile": "./dist/tsconfig.tsbuildinfo",
+    
+    // Solana/Rarible specific
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["src/*"]
+    },
+    
+    // Node.js specific
+    "types": ["node"],
+    
+    // Better error messages
+    "noErrorTruncation": true
   },
   "include": [
-    "src/**/*"
+    "src/**/*",
+    "src/**/*.json"
   ],
   "exclude": [
     "node_modules",
     "dist",
-    "**/*.test.ts"
-  ]
+    "**/*.test.ts",
+    "**/*.test.js",
+    "**/*.spec.ts",
+    "**/*.spec.js"
+  ],
+  "ts-node": {
+    "esm": true,
+    "experimentalSpecifierResolution": "node"
+  }
 }
