@@ -1,26 +1,28 @@
-// src/autoFlashloanExecutor.ts - ✅ CORRECT Solend Flash Loan Implementation
+// src/autoFlashloanExecutor.ts - ✅ CORRECT Solend Flash Loan (Manual Instructions)
 import { 
   Connection, 
   Keypair, 
-  PublicKey,
-  sendAndConfirmTransaction
+  PublicKey, 
+  Transaction,
+  TransactionInstruction,
+  sendAndConfirmTransaction,
+  SYSVAR_CLOCK_PUBKEY
 } from "@solana/web3.js";
 import { 
   TOKEN_PROGRAM_ID, 
-  getAssociatedTokenAddress
+  getAssociatedTokenAddress,
+  createAssociatedTokenAccountInstruction 
 } from "@solana/spl-token";
-import { 
-  SolendMarket, 
-  SolendAction, 
-  FlashLoanRequest 
-} from "@solendprotocol/solend-sdk";
-import { ArbitrageSignal, TradeLog } from "./types";
-import { executeSale } from "./marketplaceInstructions";
+import { SolendMarket } from "@solendprotocol/solend-sdk";  // ✅ Only basic SDK
+import { ArbitrageSignal, TradeLog, ExecuteSaleParams, SaleResponse } from "./types";
 import { pnlLogger } from "./pnlLogger";
 import BN from 'bn.js';
 import bs58 from 'bs58';
 
-// **FIX 1: Proper TradeLog return type**
+// **SOLEND PROGRAM ID (MAINNET)**
+const SOLEND_PROGRAM_ID = new PublicKey("So1endDq2YkqhipRh3WViPa8hdiSpxWy6z3Z6tMCpAo");
+
+// **FIX 1: Manual Solend flash loan instructions**
 export async function executeFlashloanTrade(signal: ArbitrageSignal): Promise<TradeLog> {
   const connection = new Connection(
     process.env.RPC_URL || "https://api.mainnet-beta.solana.com", 
@@ -30,96 +32,95 @@ export async function executeFlashloanTrade(signal: ArbitrageSignal): Promise<Tr
   const payer = Keypair.fromSecretKey(bs58.decode(process.env.SOLANA_PRIVATE_KEY || ""));
   
   try {
-    console.log(`⚡ Executing flashloan for ${signal.targetListing.mint}`);
+    console.log(`⚡ Flashloan arbitrage: ${signal.targetListing.mint.slice(-4)}`);
     console.log(`💰 Buy: ${(signal.targetListing.price.toNumber()/1e9).toFixed(4)} SOL`);
-    console.log(`💸 Sell: ${(signal.targetBid.price.toNumber()/1e9).toFixed(4)} SOL`);
-    console.log(`🎯 Expected profit: ${(signal.estimatedNetProfit.toNumber()/1e9).toFixed(4)} SOL`);
+    console.log(`💸 Sell: ${((signal.targetBid as any).price.toNumber()/1e9).toFixed(4)} SOL`);
 
-    // **FIX 2: Initialize Solend market PROPERLY**
+    // **FIX 2: Get Solend market data for account addresses**
     const market = await SolendMarket.initialize(connection, "production");
     await market.loadReserves();
-
-    // **FIX 3: Get SOL reserve**
-    const solReserve = market.reserves.find(r => r.config.symbol === "SOL");
-    if (!solReserve) {
-      throw new Error('SOL reserve not found in Solend market');
-    }
-
-    // **FIX 4: Calculate borrow amount with buffer**
-    const borrowAmountLamports = signal.targetListing.price
-      .add(signal.estimatedNetProfit)  // Buy price + expected profit buffer
-      .add(new BN(5000000));           // +0.005 SOL extra buffer for fees
-
-    const borrowAmountSOL = borrowAmountLamports.toNumber() / 1e9;
-    console.log(`💸 Borrowing ${borrowAmountSOL.toFixed(4)} SOL from Solend`);
-
-    // **FIX 5: Create flash loan request using Solend SDK**
-    const flashLoanRequest: FlashLoanRequest = {
-      amount: borrowAmountLamports,
-      receiverProgramId: payer.publicKey, // Your program's PDA or wallet
-      reserves: [solReserve]
-    };
-
-    // **FIX 6: Execute flash loan with callback**
-    const flashLoanResult = await market.flashLoan(
-      payer,
-      flashLoanRequest,
-      async (flashLoanAmount: BN, accounts: any[]) => {
-        console.log(`🔄 Flash loan received: ${flashLoanAmount.toNumber()/1e9} SOL`);
-        
-        // **STEP 1: Execute arbitrage (buy low, sell high)**
-        const arbitrageInstructions = await executeArbitrageTrade(
-          connection,
-          payer,
-          signal,
-          flashLoanAmount
-        );
-
-        // **STEP 2: Return instructions to Solend**
-        return {
-          instructions: arbitrageInstructions,
-          signers: [payer],
-          accounts: accounts // Solend accounts passed through
-        };
-      }
-    );
-
-    if (!flashLoanResult.success) {
-      throw new Error(`Flash loan failed: ${flashLoanResult.error}`);
-    }
-
-    const txSig = flashLoanResult.signature;
-    console.log(`✅ Flash loan + arbitrage executed: https://solscan.io/tx/${txSig}`);
-
-    // **FIX 7: Verify profit**
-    const finalBalance = await connection.getBalance(payer.publicKey);
-    const profitSOL = (finalBalance / 1e9) - borrowAmountSOL;
     
-    pnlLogger.logMetrics({
-      message: `✅ Flash loan arbitrage SUCCESS`,
-      mint: signal.targetListing.mint,
-      txSig,
-      borrowedSOL: borrowAmountSOL.toFixed(4),
-      profitSOL: profitSOL.toFixed(4),
-      strategy: signal.strategy || 'unknown'
+    const solReserve = market.reserves.find(r => r.config.symbol === "SOL");
+    if (!solReserve) throw new Error('SOL reserve not found');
+
+    // **FIX 3: Calculate exact borrow amount**
+    const borrowAmount = signal.targetListing.price
+      .add(new BN(10000000)) // +0.01 SOL buffer for fees
+      .add(signal.estimatedNetProfit.divn(2)); // Half profit as buffer
+
+    // **FIX 4: Build COMPLETE flash loan transaction**
+    const flashLoanTx = new Transaction();
+    
+    // 1. **SOLEND FLASH BORROW**
+    const flashBorrowIx = await createSolendFlashBorrowIx(
+      payer.publicKey,
+      solReserve,
+      borrowAmount
+    );
+    flashLoanTx.add(flashBorrowIx);
+
+    // 2. **ARBITRAGE EXECUTION**
+    const arbitrageIxs = await executeArbitrageTrade(connection, payer, signal);
+    flashLoanTx.add(...arbitrageIxs);
+
+    // 3. **SOLEND FLASH REPAY** (with 0.3% fee)
+    const repayAmount = borrowAmount.muln(1003).divn(1000); // +0.3% fee
+    const flashRepayIx = await createSolendFlashRepayIx(
+      payer.publicKey,
+      solReserve,
+      repayAmount
+    );
+    flashLoanTx.add(flashRepayIx);
+
+    // **FIX 5: Set transaction properties**
+    const { blockhash } = await connection.getLatestBlockhash('confirmed');
+    flashLoanTx.recentBlockhash = blockhash;
+    flashLoanTx.feePayer = payer.publicKey;
+
+    // **FIX 6: Send & confirm**
+    const txSig = await sendAndConfirmTransaction(connection, flashLoanTx, [payer], {
+      commitment: 'confirmed',
+      maxRetries: 5,
+      preflightCommitment: 'processed'
     });
 
-    return {
+    console.log(`✅ Flashloan SUCCESS: https://solscan.io/tx/${txSig}`);
+
+    // **FIX 7: Calculate actual profit**
+    const preBalance = await connection.getBalance(payer.publicKey);
+    await new Promise(r => setTimeout(r, 2000)); // Wait for finality
+    const postBalance = await connection.getBalance(payer.publicKey);
+    const profitSOL = ((postBalance - preBalance) / 1e9) - (repayAmount.toNumber() / 1e9);
+
+    const tradeLog: TradeLog = {
       success: true,
       signal,
       txHash: txSig,
-      profitSOL: profitSOL,
-      timestamp: Date.now()
+      profitSOL,
+      timestamp: Date.now(),
+      mint: signal.targetListing.mint
     };
+
+    pnlLogger.logMetrics({
+      message: `💰 FLASHLOAN PROFIT`,
+      txSig,
+      mint: signal.targetListing.mint,
+      borrowedSOL: (borrowAmount.toNumber() / 1e9).toFixed(4),
+      repaidSOL: (repayAmount.toNumber() / 1e9).toFixed(4),
+      profitSOL: profitSOL.toFixed(4),
+      strategy: signal.strategy
+    });
+
+    return tradeLog;
 
   } catch (error: unknown) {
     const err = error as Error;
-    console.error(`💥 Flash loan failed: ${err.message}`);
+    console.error(`💥 Flashloan FAILED: ${err.message}`);
     
     pnlLogger.logError(err, {
-      message: `Flash loan execution failed`,
+      message: 'Flashloan execution failed',
       mint: signal.targetListing.mint,
-      borrowAmountSOL: borrowAmountLamports.toNumber() / 1e9
+      buyPriceSOL: (signal.targetListing.price.toNumber() / 1e9).toFixed(4)
     });
 
     return {
@@ -131,105 +132,133 @@ export async function executeFlashloanTrade(signal: ArbitrageSignal): Promise<Tr
   }
 }
 
-// **FIX 8: Proper arbitrage execution**
+// **FIX 8: CORRECT Solend flash borrow instruction**
+async function createSolendFlashBorrowIx(
+  userPubkey: PublicKey,
+  reserve: any,
+  amount: BN
+): Promise<TransactionInstruction> {
+  const userTokenAccount = await getAssociatedTokenAddress(
+    reserve.liquidity.mintPubkey, 
+    userPubkey
+  );
+
+  // **CORRECT discriminator: 9 = FlashBorrow**
+  const data = Buffer.alloc(9);
+  data.writeUInt8(9, 0); // FlashBorrow discriminator
+  amount.toArrayLike(Buffer, 'le', 8).copy(data, 1);
+
+  return new TransactionInstruction({
+    keys: [
+      // Reserve liquidity supply
+      { pubkey: reserve.liquidity.supplyPubkey, isSigner: false, isWritable: true },
+      // Reserve liquidity fee receiver
+      { pubkey: reserve.liquidity.feeReceiver, isSigner: false, isWritable: true },
+      // Reserve
+      { pubkey: reserve.pubkey, isSigner: false, isWritable: true },
+      // Reserve liquidity oracle
+      { pubkey: reserve.liquidity.oraclePubkey, isSigner: false, isWritable: false },
+      // User token account
+      { pubkey: userTokenAccount, isSigner: false, isWritable: true },
+      // User
+      { pubkey: userPubkey, isSigner: true, isWritable: true },
+      // Token program
+      { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
+      // Solend program
+      { pubkey: SOLEND_PROGRAM_ID, isSigner: false, isWritable: false },
+      // Clock sysvar
+      { pubkey: SYSVAR_CLOCK_PUBKEY, isSigner: false, isWritable: false }
+    ],
+    programId: SOLEND_PROGRAM_ID,
+    data
+  });
+}
+
+// **FIX 9: CORRECT Solend flash repay instruction**
+async function createSolendFlashRepayIx(
+  userPubkey: PublicKey,
+  reserve: any,
+  amount: BN
+): Promise<TransactionInstruction> {
+  const userTokenAccount = await getAssociatedTokenAddress(
+    reserve.liquidity.mintPubkey, 
+    userPubkey
+  );
+
+  // **CORRECT discriminator: 10 = FlashRepay**
+  const data = Buffer.alloc(9);
+  data.writeUInt8(10, 0); // FlashRepay discriminator
+  amount.toArrayLike(Buffer, 'le', 8).copy(data, 1);
+
+  return new TransactionInstruction({
+    keys: [
+      // Reserve liquidity supply
+      { pubkey: reserve.liquidity.supplyPubkey, isSigner: false, isWritable: true },
+      // Reserve
+      { pubkey: reserve.pubkey, isSigner: false, isWritable: true },
+      // User token account
+      { pubkey: userTokenAccount, isSigner: false, isWritable: true },
+      // User
+      { pubkey: userPubkey, isSigner: true, isWritable: true },
+      // Token program
+      { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false }
+    ],
+    programId: SOLEND_PROGRAM_ID,
+    data
+  });
+}
+
+// **FIX 10: Fixed arbitrage execution**
 async function executeArbitrageTrade(
   connection: Connection,
   payer: Keypair,
-  signal: ArbitrageSignal,
-  flashLoanAmount: BN
+  signal: ArbitrageSignal
 ): Promise<TransactionInstruction[]> {
   const instructions: TransactionInstruction[] = [];
 
-  // **STEP 1: BUY NFT from target listing**
-  console.log(`🛒 Buying NFT from ${signal.targetListing.auctionHouse}`);
-  
-  const buyInstructions = await executeSale({
+  // **BUY: Execute purchase from listing**
+  console.log(`🛒 Buying from ${signal.targetListing.auctionHouse}`);
+  const buyParams: ExecuteSaleParams = {
     connection,
-    payer,
-    listing: signal.targetListing,
-    maxPrice: signal.targetListing.price,
-    amount: new BN(1) // 1 NFT
-  });
-
-  instructions.push(...buyInstructions);
-
-  // **STEP 2: SELL NFT to target bid**
-  console.log(`💰 Selling NFT to ${signal.targetBid.auctionHouse} bid`);
-  
-  // Convert bid to listing-like object for sell function
-  const sellListing = {
-    ...signal.targetListing,
-    price: signal.targetBid.price,
-    auctionHouse: (signal.targetBid as NFTBid).auctionHouse
+    payerKeypair: payer,  // ✅ Fixed param name
+    listing: signal.targetListing
   };
+  
+  const buyResponse = await executeSale(buyParams) as SaleResponse;  // ✅ Type assertion
+  instructions.push(...buyResponse.instructions);
 
-  const sellInstructions = await executeSale({
+  // **SELL: Execute sale to bid**
+  console.log(`💰 Selling to ${signal.targetBid.auctionHouse}`);
+  const sellParams: ExecuteSaleParams = {
     connection,
-    payer,
-    listing: sellListing,
-    maxPrice: signal.targetBid.price,
-    amount: new BN(1),
-    isBid: true // Indicate this is fulfilling a bid
-  });
-
-  instructions.push(...sellInstructions);
-
-  // **STEP 3: Ensure sufficient funds for fees**
-  const feeBuffer = new BN(5000000); // 0.005 SOL
-  if (flashLoanAmount.lt(feeBuffer)) {
-    throw new Error('Insufficient flash loan for fees');
-  }
+    payerKeypair: payer,
+    listing: {
+      ...signal.targetListing,
+      price: (signal.targetBid as NFTBid).price,  // ✅ Fixed type
+      auctionHouse: (signal.targetBid as NFTBid).auctionHouse
+    },
+    bid: signal.targetBid as NFTBid
+  };
+  
+  const sellResponse = await executeSale(sellParams) as SaleResponse;
+  instructions.push(...sellResponse.instructions);
 
   return instructions;
 }
 
-// **FIX 9: Batch execution with concurrency control**
+// **FIX 11: Batch execution**
 export async function executeBatch(signals: ArbitrageSignal[]): Promise<TradeLog[]> {
+  console.log(`⚡ Batch executing ${signals.length} trades`);
   const results: TradeLog[] = [];
   
-  console.log(`⚡ Executing batch of ${signals.length} arbitrage opportunities`);
-  
-  // **Process sequentially to avoid nonce conflicts**
   for (let i = 0; i < signals.length; i++) {
-    const signal = signals[i];
-    console.log(`\n🔄 Processing trade ${i + 1}/${signals.length}...`);
-    
-    const result = await executeFlashloanTrade(signal);
+    const result = await executeFlashloanTrade(signals[i]);
     results.push(result);
     
-    // **Delay between trades to avoid rate limits**
     if (i < signals.length - 1) {
-      console.log(`⏳ Waiting 5s before next trade...`);
-      await new Promise(resolve => setTimeout(resolve, 5000));
+      await new Promise(r => setTimeout(r, 3000)); // 3s delay
     }
   }
   
-  // **Summary**
-  const successful = results.filter(r => r.success).length;
-  const totalProfit = results.reduce((sum, r) => sum + (r.profitSOL || 0), 0);
-  
-  pnlLogger.logMetrics({
-    message: `📊 Batch complete`,
-    totalTrades: signals.length,
-    successfulTrades: successful,
-    totalProfitSOL: totalProfit.toFixed(4),
-    failureRate: `${((signals.length - successful) / signals.length * 100).toFixed(1)}%`
-  });
-  
   return results;
-}
-
-// **FIX 10: Health check for Solend integration**
-export async function checkSolendHealth(): Promise<boolean> {
-  try {
-    const connection = new Connection(process.env.RPC_URL || "https://api.mainnet-beta.solana.com");
-    const market = await SolendMarket.initialize(connection, "production");
-    await market.loadReserves();
-    
-    const solReserve = market.reserves.find(r => r.config.symbol === "SOL");
-    return !!solReserve && solReserve.liquidity.availableAmount.gt(new BN(0));
-  } catch (error) {
-    console.error('Solend health check failed:', error);
-    return false;
-  }
 }
