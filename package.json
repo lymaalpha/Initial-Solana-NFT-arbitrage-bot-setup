@@ -3,17 +3,15 @@
   "version": "1.0.0",
   "description": "Automated NFT arbitrage bot for Solana using flash loans",
   "main": "dist/main.js",
+  "type": "commonjs",
   "scripts": {
     "start": "node dist/main.js",
-    "dev": "ts-node --esm src/main.ts",
+    "dev": "ts-node src/main.ts",
     "build": "tsc",
     "build:clean": "rm -rf dist && tsc",
     "test": "jest",
-    "test:watch": "jest --watch",
     "lint": "eslint src/**/*.ts",
-    "lint:fix": "eslint src/**/*.ts --fix",
-    "type-check": "tsc --noEmit",
-    "clean": "rm -rf dist node_modules package-lock.json"
+    "type-check": "tsc --noEmit"
   },
   "engines": {
     "node": ">=20.0.0"
@@ -32,9 +30,8 @@
     "dotenv": "^16.3.1",
     "winston": "^3.11.0",
     
-    // ✅ FIXED: Rarible Solana SDK (matching versions)
+    // ✅ Rarible SDK (Ethereum only for now)
     "@rarible/sdk": "^0.13.200-beta.0",
-    "@rarible/sdk-solana": "^0.13.200-beta.0",
     "@rarible/types": "^0.10.7",
     "@rarible/api-client": "^1.136.0-SNAPSHOT-update-types",
     
@@ -46,30 +43,7 @@
     "@types/node": "^20.10.0",
     "@types/bn.js": "^5.2.0",
     "@types/bs58": "^4.0.4",
-    "typescript": "^5.6.3",
-    "ts-node": "^10.9.2",
-    
-    // Linting
-    "@typescript-eslint/eslint-plugin": "^6.21.0",
-    "@typescript-eslint/parser": "^6.21.0",
-    "eslint": "^8.57.0",
-    "eslint-config-prettier": "^9.1.0",
-    
-    // Testing
-    "jest": "^29.7.0",
-    "@types/jest": "^29.5.12",
-    "ts-jest": "^29.2.5"
-  },
-  "keywords": ["solana", "nft", "arbitrage", "flash-loans", "trading-bot"],
-  "author": "Your Name",
-  "license": "MIT",
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/lymaalpha/Initial-Solana-NFT-arbitrage-bot-setup.git"
-  },
-  "bugs": {
-    "url": "https://github.com/lymaalpha/Initial-Solana-NFT-arbitrage-bot-setup/issues"
-  },
-  "homepage": "https://github.com/lymaalpha/Initial-Solana-NFT-arbitrage-bot-setup#readme",
-  "packageManager": "npm@10.2.3"
+    "typescript": "^5.3.2",
+    "ts-node": "^10.9.1"
+  }
 }
