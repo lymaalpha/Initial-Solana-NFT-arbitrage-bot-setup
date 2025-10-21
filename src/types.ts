@@ -1,46 +1,34 @@
+// src/types.ts
 import BN from 'bn.js';
 
-export type AuctionHouse = 'MagicEden' | 'Tensor' | 'Rarible' | 'moralis'; // ✅ FIXED: Added ALL marketplaces
-export type Currency = 'SOL';
-export type ExecutorType = 'direct' | 'flash_loan';
-export type TradeType = 'signal' | 'executed' | 'failed';
+export type AuctionHouse = 'MagicEden' | 'Tensor' | 'Rarible';
 
-export interface NFTMarketData {
+export interface NFTListing {
   mint: string;
-  auctionHouse: AuctionHouse;  // ✅ Now supports MagicEden, Tensor, moralis
+  auctionHouse: AuctionHouse;
   price: BN;
-  currency: Currency;
-  timestamp?: number;
-  bidderPubkey?: string;       // ✅ Only for bids
+  currency: 'SOL'; // Only SOL for consistency
+  timestamp: number;
+  sellerPubkey: string;
 }
 
-export interface NFTListing extends NFTMarketData {
-  sellerPubkey: string;        // ✅ Only for listings
+export interface NFTBid {
+  mint: string;
+  auctionHouse: AuctionHouse;
+  price: BN;
+  currency: 'SOL';
+  timestamp: number;
+  bidderPubkey: string;
 }
 
-export interface NFTBid extends NFTMarketData {
-  bidderPubkey: string;        // ✅ Required for bids
-}
-
+// **FIX 1: Enhanced ArbitrageSignal with missing properties**
 export interface ArbitrageSignal {
   targetListing: NFTListing;
-  targetBid: NFTBid;
+  targetBid: NFTBid | NFTListing; // Can be bid or listing for arbitrage
   estimatedNetProfit: BN;
-  rawProfit: BN;
-  confidence: number;
-  timestamp: number;
-}
-
-export interface TradeLog {
-  timestamp: number;
-  mint: string;
-  buyPrice: BN;
-  sellPrice: BN;
-  netProfit: BN;
-  currency: Currency;
-  txSig?: string;
-  type: TradeType;
-  executorType?: ExecutorType;
-  buyAuctionHouse?: AuctionHouse;  // ✅ Added: Which marketplace bought from
-  sellAuctionHouse?: AuctionHouse; // ✅ Added: Which marketplace sold to
+  estimatedGrossProfit?: BN;     // ✅ ADDED
+  strategy?: string;             // ✅ ADDED
+  marketplaceIn?: string;        // ✅ ADDED
+  marketplaceOut?: string;       // ✅ ADDED
+  confidence?: number;           // Optional confidence score
 }
