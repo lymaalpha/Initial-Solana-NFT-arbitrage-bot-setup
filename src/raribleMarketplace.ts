@@ -119,7 +119,8 @@ export async function fetchBids(collectionId: string): Promise<NFTBid[]> {
 // --- Accept bid (sell NFT) ---
 export async function acceptBid(orderId: string, amount = 1) {
   try {
-    const tx = await sdk.order.acceptBid({ orderId: toOrderId(orderId), amount })
+    const prepare = await sdk.order.acceptBid({ orderId: toOrderId(orderId), amount });
+    const tx = await prepare.submit();
     pnlLogger.logMetrics({ message: "✅ Accepted bid", txHash: tx.hash, orderId })
     return tx
   } catch (err: any) {
@@ -133,12 +134,13 @@ import { OrderId } from "@rarible/types";
 
 export async function sellNFT(itemId: string, priceSOL: string, amount = 1): Promise<OrderId | null> {
   try {
-    const orderId = await sdk.order.sell({
+    const prepare = await sdk.order.sell({
       itemId: toItemId(itemId),
       amount,
       price: priceSOL,
       currency: toCurrencyId("SOLANA:SOL"),
-    })
+    });
+    const orderId = await prepare.submit();
     pnlLogger.logMetrics({ message: "✅ NFT listed for sale", itemId, orderId })
     return orderId
   } catch (err: any) {
