@@ -128,7 +128,9 @@ export async function acceptBid(orderId: string, amount = 1) {
 }
 
 // --- List NFT for sale ---
-export async function sellNFT(itemId: string, priceSOL: string, amount = 1) {
+import { OrderId } from "@rarible/types";
+
+export async function sellNFT(itemId: string, priceSOL: string, amount = 1): Promise<OrderId | null> {
   try {
     const orderId = await sdk.order.sell({
       itemId: toItemId(itemId),
