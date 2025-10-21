@@ -10,24 +10,30 @@ import { Connection, Keypair } from '@solana/web3.js'
 import { SolanaSigner } from '@rarible/sdk-solana'
 
 // --- Wallet + SDK setup ---
+let sdk: IRaribleSdk
+let sdkReadOnly: IRaribleSdk
+
 try {
   // Load Solana wallet from base58 private key
   const secretKey = bs58.decode(process.env.SOLANA_PRIVATE_KEY!)
   const wallet = Keypair.fromSecretKey(secretKey)
   
-  // Solana connection (use your RPC URL)
-  const connection = new Connection(process.env.RPC_URL || 'https://api.mainnet-beta.solana.com')
+  // Solana connection
+  const connection = new Connection(
+    process.env.RPC_URL || 'https://api.mainnet-beta.solana.com',
+    'confirmed'
+  )
   
   // Create Solana signer for Rarible SDK
   const solanaSigner = new SolanaSigner(wallet, connection)
   
   // SDK with wallet for executing trades
-  export const sdk: IRaribleSdk = createRaribleSdk(solanaSigner, "prod", { 
+  sdk = createRaribleSdk(solanaSigner, "prod", { 
     apiKey: process.env.RARIBLE_API_KEY || "" 
   })
 
   // SDK read-only for fetching data
-  export const sdkReadOnly: IRaribleSdk = createRaribleSdk(undefined, "prod", { 
+  sdkReadOnly = createRaribleSdk(undefined, "prod", { 
     apiKey: process.env.RARIBLE_API_KEY || "" 
   })
 
@@ -53,18 +59,16 @@ export async function fetchListings(collectionId: string): Promise<NFTListing[]>
         const sellOrder = item.sellOrders?.[0]
         if (!sellOrder?.make?.value || !item.id || !sellOrder.maker) return null
         
-        // Extract Solana address from maker
-        const sellerPubkey = sellOrder.maker
         return {
           mint: item.id,
           auctionHouse: "Rarible" as AuctionHouse,
           price: new BN(sellOrder.make.value),
           currency: "SOL" as const,
           timestamp: now,
-          sellerPubkey: sellerPubkey,
+          sellerPubkey: sellOrder.maker,
         }
       })
-      .filter((x): x is NFTListing => x !== null)
+      .filter((listing: NFTListing | null): listing is NFTListing => listing !== null)
     
     const priceRangeSOL = listings.length > 0
       ? `${(listings[0].price.toNumber() / 1e9).toFixed(2)} - ${(listings[listings.length - 1].price.toNumber() / 1e9).toFixed(2)} SOL`
@@ -94,17 +98,30 @@ export async function fetchListings(collectionId: string): Promise<NFTListing[]>
 export async function fetchBids(collectionId: string): Promise<NFTBid[]> {
   try {
     const orderController = sdkReadOnly.apis.order
-    const result = await orderController.getOrdersByCollection({
-      collection: collectionId,
-      status: [OrderStatus.ACTIVE],
-      type: 'BID', // Filter for bids specifically
-      size: 30
-    })
+    
+    // Fallback to broader query if collection-specific bids fail
+    let result
+    try {
+      result = await orderController.getOrdersByCollection({
+        collection: collectionId,
+        status: [OrderStatus.ACTIVE],
+        type: 'BID',
+        size: 30
+      })
+    } catch {
+      // Fallback to all active bids
+      result = await orderController.getOrdersAll({
+        status: [OrderStatus.ACTIVE],
+        type: 'BID',
+        size: 30
+      })
+    }
     
     const now = Date.now()
     const bids: NFTBid[] = result.orders
       .map((order: any): NFTBid | null => {
-        if (!order.take?.value || !order.maker) return null
+        // Filter for bids (take = SOL, make = NFT)
+        if (!order.take?.value || !order.maker || order.type !== 'BID') return null
         return {
           mint: collectionId,
           auctionHouse: "Rarible" as AuctionHouse,
@@ -114,7 +131,7 @@ export async function fetchBids(collectionId: string): Promise<NFTBid[]> {
           bidderPubkey: order.maker,
         }
       })
-      .filter((x): x is NFTBid => x !== null)
+      .filter((bid: NFTBid | null): bid is NFTBid => bid !== null)
     
     pnlLogger.logMetrics({
       message: "✅ Rarible bids fetched",
@@ -160,9 +177,7 @@ export async function acceptBid(orderId: string, amount = 1) {
 }
 
 // --- List NFT for sale ---
-import { OrderId } from "@rarible/types"
-
-export async function sellNFT(itemId: string, priceSOL: string, amount = 1): Promise<OrderId | null> {
+export async function sellNFT(itemId: string, priceSOL: string, amount = 1): Promise<string | null> {
   try {
     const priceInLamports = (parseFloat(priceSOL) * 1e9).toString()
     
@@ -202,13 +217,14 @@ export async function healthCheck(): Promise<boolean> {
   }
 }
 
-// Export default
+// Export SDK instances for external use
+export { sdk, sdkReadOnly }
+
+// Default export
 export default { 
   fetchListings, 
   fetchBids, 
   acceptBid, 
   sellNFT, 
-  healthCheck,
-  sdk,
-  sdkReadOnly 
+  healthCheck 
 }
