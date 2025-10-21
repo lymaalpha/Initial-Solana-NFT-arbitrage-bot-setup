@@ -5,13 +5,18 @@
   "main": "dist/main.js",
   "scripts": {
     "start": "node dist/main.js",
-    "dev": "ts-node src/main.ts",
+    "dev": "ts-node --esm src/main.ts",
     "build": "tsc",
+    "build:clean": "rm -rf dist && tsc",
     "test": "jest",
-    "lint": "eslint src/**/*.ts"
+    "test:watch": "jest --watch",
+    "lint": "eslint src/**/*.ts",
+    "lint:fix": "eslint src/**/*.ts --fix",
+    "type-check": "tsc --noEmit",
+    "clean": "rm -rf dist node_modules package-lock.json"
   },
   "engines": {
-    "node": "20"
+    "node": ">=20.0.0"
   },
   "dependencies": {
     "@metaplex-foundation/js": "^0.20.1",
@@ -26,25 +31,45 @@
     "csv-writer": "^1.6.0",
     "dotenv": "^16.3.1",
     "winston": "^3.11.0",
+    
+    // ✅ FIXED: Rarible Solana SDK (matching versions)
     "@rarible/sdk": "^0.13.200-beta.0",
+    "@rarible/sdk-solana": "^0.13.200-beta.0",
     "@rarible/types": "^0.10.7",
     "@rarible/api-client": "^1.136.0-SNAPSHOT-update-types",
+    
+    // EVM compatibility
     "ethers": "^5.7.2",
-    "viem": "^2.x.x"
+    "viem": "^2.21.28"
   },
   "devDependencies": {
     "@types/node": "^20.10.0",
     "@types/bn.js": "^5.2.0",
     "@types/bs58": "^4.0.4",
-    "typescript": "^5.3.2",
-    "ts-node": "^10.9.1",
-    "@typescript-eslint/eslint-plugin": "^6.13.1",
-    "@typescript-eslint/parser": "^6.13.1",
-    "eslint": "^8.54.0",
+    "typescript": "^5.6.3",
+    "ts-node": "^10.9.2",
+    
+    // Linting
+    "@typescript-eslint/eslint-plugin": "^6.21.0",
+    "@typescript-eslint/parser": "^6.21.0",
+    "eslint": "^8.57.0",
+    "eslint-config-prettier": "^9.1.0",
+    
+    // Testing
     "jest": "^29.7.0",
-    "@types/jest": "^29.5.8"
+    "@types/jest": "^29.5.12",
+    "ts-jest": "^29.2.5"
   },
-  "keywords": [ "solana", "nft", "arbitrage", "flash-loans", "trading-bot" ],
+  "keywords": ["solana", "nft", "arbitrage", "flash-loans", "trading-bot"],
   "author": "Your Name",
-  "license": "MIT"
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/lymaalpha/Initial-Solana-NFT-arbitrage-bot-setup.git"
+  },
+  "bugs": {
+    "url": "https://github.com/lymaalpha/Initial-Solana-NFT-arbitrage-bot-setup/issues"
+  },
+  "homepage": "https://github.com/lymaalpha/Initial-Solana-NFT-arbitrage-bot-setup#readme",
+  "packageManager": "npm@10.2.3"
 }
