@@ -1,55 +1,74 @@
 import { createRaribleSdk } from "@rarible/sdk"
 import { toItemId, toOrderId, toCurrencyId } from "@rarible/types"
-
 import type { IRaribleSdk } from "@rarible/sdk"
 import { NFTListing, NFTBid, AuctionHouse } from "./types"
 import { OrderStatus } from "@rarible/api-client"
 import { pnlLogger } from "./pnlLogger"
 import BN from "bn.js"
-import { JsonRpcProvider } from "@ethersproject/providers";
-import { Wallet } from "@ethersproject/wallet";
+import * as bs58 from 'bs58'
+import { Connection, Keypair } from '@solana/web3.js'
+import { SolanaSigner } from '@rarible/sdk-solana'
 
 // --- Wallet + SDK setup ---
+try {
+  // Load Solana wallet from base58 private key
+  const secretKey = bs58.decode(process.env.SOLANA_PRIVATE_KEY!)
+  const wallet = Keypair.fromSecretKey(secretKey)
+  
+  // Solana connection (use your RPC URL)
+  const connection = new Connection(process.env.RPC_URL || 'https://api.mainnet-beta.solana.com')
+  
+  // Create Solana signer for Rarible SDK
+  const solanaSigner = new SolanaSigner(wallet, connection)
+  
+  // SDK with wallet for executing trades
+  export const sdk: IRaribleSdk = createRaribleSdk(solanaSigner, "prod", { 
+    apiKey: process.env.RARIBLE_API_KEY || "" 
+  })
 
-const provider = new JsonRpcProvider(process.env.RPC_URL!);
-const wallet = new Wallet(process.env.PRIVATE_KEY!, provider);
+  // SDK read-only for fetching data
+  export const sdkReadOnly: IRaribleSdk = createRaribleSdk(undefined, "prod", { 
+    apiKey: process.env.RARIBLE_API_KEY || "" 
+  })
 
-// To make ethers.Wallet compatible with Rarible SDK's EtherSigner
-// We need to ensure it has the _signTypedData method.
-// For now, we'll cast it, but a proper solution might involve a wrapper or a specific SDK adapter.
-const raribleWallet = wallet as any; // Casting to any to bypass type checking for _signTypedData
+  console.log(`✅ Solana wallet loaded: ${wallet.publicKey.toString()}`)
 
-// SDK with wallet for executing trades
-export const sdk: IRaribleSdk = createRaribleSdk(raribleWallet, "prod", { apiKey: process.env.RARIBLE_API_KEY || "" })
-
-// SDK read-only for fetching data
-const sdkReadOnly: IRaribleSdk = createRaribleSdk(undefined, "prod", { apiKey: process.env.RARIBLE_API_KEY || "" })
+} catch (error: any) {
+  console.error('❌ Failed to initialize Rarible SDK:', error.message)
+  throw new Error(`Rarible SDK initialization failed: ${error.message}`)
+}
 
 // --- Fetch listings ---
 export async function fetchListings(collectionId: string): Promise<NFTListing[]> {
   try {
-    const itemController = sdkReadOnly.apis.item;
-    const result = await itemController.getItemsByCollection({ collection: collectionId, size: 50 })
+    const itemController = sdkReadOnly.apis.item
+    const result = await itemController.getItemsByCollection({ 
+      collection: collectionId, 
+      size: 50 
+    })
+    
     const now = Date.now()
     const listings: NFTListing[] = result.items
       .map((item: any): NFTListing | null => {
-        const sellOrder = item.sellOrders?.[0];
-        if (!sellOrder?.make?.value || !item.id || !sellOrder.maker) return null;
+        const sellOrder = item.sellOrders?.[0]
+        if (!sellOrder?.make?.value || !item.id || !sellOrder.maker) return null
+        
+        // Extract Solana address from maker
+        const sellerPubkey = sellOrder.maker
         return {
           mint: item.id,
           auctionHouse: "Rarible" as AuctionHouse,
           price: new BN(sellOrder.make.value),
           currency: "SOL" as const,
           timestamp: now,
-          sellerPubkey: sellOrder.maker,
-        };
+          sellerPubkey: sellerPubkey,
+        }
       })
       .filter((x): x is NFTListing => x !== null)
     
-    // Check if listings array is not empty before accessing elements
     const priceRangeSOL = listings.length > 0
       ? `${(listings[0].price.toNumber() / 1e9).toFixed(2)} - ${(listings[listings.length - 1].price.toNumber() / 1e9).toFixed(2)} SOL`
-      : "N/A";
+      : "N/A"
 
     pnlLogger.logMetrics({
       message: "✅ Rarible listings fetched",
@@ -58,6 +77,7 @@ export async function fetchListings(collectionId: string): Promise<NFTListing[]>
       priceRangeSOL: priceRangeSOL,
       source: "Rarible SDK"
     })
+    
     return listings
   } catch (err: any) {
     pnlLogger.logMetrics({
@@ -73,21 +93,18 @@ export async function fetchListings(collectionId: string): Promise<NFTListing[]>
 // --- Fetch bids ---
 export async function fetchBids(collectionId: string): Promise<NFTBid[]> {
   try {
-    const orderController = sdkReadOnly.apis.order;
-    // The getBidsByCollection method might be specific to a certain version or not directly exposed.
-    // A more generic way to fetch orders and filter for bids might be needed if this continues to fail.
-    // For now, assuming it exists or a similar method can be used.
-    // The GetOrdersAllRequest does not directly support 'collection' and 'type' as top-level parameters.
-    // A more appropriate method or a different approach might be needed if direct filtering is not available.
-    // For demonstration, we'll call it without these filters, assuming post-filtering if necessary.
-    const result = await orderController.getOrdersAll({
-      size: 30,
-      status: [OrderStatus.ACTIVE], // Assuming active orders are bids/listings
-    });
+    const orderController = sdkReadOnly.apis.order
+    const result = await orderController.getOrdersByCollection({
+      collection: collectionId,
+      status: [OrderStatus.ACTIVE],
+      type: 'BID', // Filter for bids specifically
+      size: 30
+    })
+    
     const now = Date.now()
     const bids: NFTBid[] = result.orders
       .map((order: any): NFTBid | null => {
-        if (!order.take?.value || !order.maker) return null;
+        if (!order.take?.value || !order.maker) return null
         return {
           mint: collectionId,
           auctionHouse: "Rarible" as AuctionHouse,
@@ -95,15 +112,17 @@ export async function fetchBids(collectionId: string): Promise<NFTBid[]> {
           currency: "SOL" as const,
           timestamp: now,
           bidderPubkey: order.maker,
-        };
+        }
       })
       .filter((x): x is NFTBid => x !== null)
+    
     pnlLogger.logMetrics({
       message: "✅ Rarible bids fetched",
       collection: collectionId,
       count: bids.length,
       source: "Rarible SDK"
     })
+    
     return bids
   } catch (err: any) {
     pnlLogger.logMetrics({
@@ -119,32 +138,55 @@ export async function fetchBids(collectionId: string): Promise<NFTBid[]> {
 // --- Accept bid (sell NFT) ---
 export async function acceptBid(orderId: string, amount = 1) {
   try {
-    const prepare = await sdk.order.acceptBid({ orderId: toOrderId(orderId), amount });
-    const tx = await prepare.submit();
-    pnlLogger.logMetrics({ message: "✅ Accepted bid", txHash: tx.hash, orderId })
+    const prepare = await sdk.order.acceptBid({ 
+      orderId: toOrderId(orderId), 
+      amount 
+    })
+    const tx = await prepare.submit()
+    pnlLogger.logMetrics({ 
+      message: "✅ Accepted bid", 
+      txHash: tx.hash, 
+      orderId 
+    })
     return tx
   } catch (err: any) {
-    pnlLogger.logMetrics({ message: "⚠️ Failed to accept bid", orderId, error: err.message || err })
+    pnlLogger.logMetrics({ 
+      message: "⚠️ Failed to accept bid", 
+      orderId, 
+      error: err.message || err 
+    })
     return null
   }
 }
 
 // --- List NFT for sale ---
-import { OrderId } from "@rarible/types";
+import { OrderId } from "@rarible/types"
 
 export async function sellNFT(itemId: string, priceSOL: string, amount = 1): Promise<OrderId | null> {
   try {
+    const priceInLamports = (parseFloat(priceSOL) * 1e9).toString()
+    
     const prepare = await sdk.order.sell({
       itemId: toItemId(itemId),
       amount,
-      price: priceSOL,
-      currency: toCurrencyId("SOLANA:SOL"),
-    });
-    const orderId = await prepare.submit();
-    pnlLogger.logMetrics({ message: "✅ NFT listed for sale", itemId, orderId })
+      price: priceInLamports,
+      currency: toCurrencyId("SOL"),
+    })
+    
+    const orderId = await prepare.submit()
+    pnlLogger.logMetrics({ 
+      message: "✅ NFT listed for sale", 
+      itemId, 
+      orderId,
+      priceSOL 
+    })
     return orderId
   } catch (err: any) {
-    pnlLogger.logMetrics({ message: "⚠️ Failed to list NFT", itemId, error: err.message || err })
+    pnlLogger.logMetrics({ 
+      message: "⚠️ Failed to list NFT", 
+      itemId, 
+      error: err.message || err 
+    })
     return null
   }
 }
@@ -152,13 +194,21 @@ export async function sellNFT(itemId: string, priceSOL: string, amount = 1): Pro
 // --- Health check ---
 export async function healthCheck(): Promise<boolean> {
   try {
-    const itemController = sdkReadOnly.apis.item;
-    // Assuming a method like getItemsByCollection with a small size can act as a health check
-    const response = await itemController.getAllItems({ size: 1 }); // A more generic health check
-    return response?.items.length > 0;
+    const itemController = sdkReadOnly.apis.item
+    const response = await itemController.getAllItems({ size: 1 })
+    return response?.items.length >= 0
   } catch {
     return false
   }
 }
 
-export default { fetchListings, fetchBids, acceptBid, sellNFT, healthCheck }
+// Export default
+export default { 
+  fetchListings, 
+  fetchBids, 
+  acceptBid, 
+  sellNFT, 
+  healthCheck,
+  sdk,
+  sdkReadOnly 
+}
