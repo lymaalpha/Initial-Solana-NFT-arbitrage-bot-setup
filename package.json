@@ -29,7 +29,7 @@
     "@rarible/sdk": "^0.13.200-beta.0",
     "@rarible/types": "^0.10.7",
     "@rarible/api-client": "^1.136.0-SNAPSHOT-update-types",
-    "ethers": "^6.15.0",
+    "ethers": "^5.7.2",
     "viem": "^2.x.x"
   },
   "devDependencies": {
