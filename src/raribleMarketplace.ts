@@ -6,12 +6,13 @@ import { NFTListing, NFTBid, AuctionHouse } from "./types"
 import { OrderStatus } from "@rarible/api-client"
 import { pnlLogger } from "./pnlLogger"
 import BN from "bn.js"
-import { ethers } from "ethers"
+import { JsonRpcProvider } from "@ethersproject/providers";
+import { Wallet } from "@ethersproject/wallet";
 
 // --- Wallet + SDK setup ---
 
-const provider = new ethers.JsonRpcProvider(process.env.RPC_URL!)
-const wallet = new ethers.Wallet(process.env.PRIVATE_KEY!, provider)
+const provider = new JsonRpcProvider(process.env.RPC_URL!);
+const wallet = new Wallet(process.env.PRIVATE_KEY!, provider);
 
 // To make ethers.Wallet compatible with Rarible SDK's EtherSigner
 // We need to ensure it has the _signTypedData method.
@@ -136,7 +137,7 @@ export async function sellNFT(itemId: string, priceSOL: string, amount = 1): Pro
       itemId: toItemId(itemId),
       amount,
       price: priceSOL,
-      currency: toCurrencyId("ETHEREUM:native"), // Map SOL if using Solana
+      currency: toCurrencyId("SOLANA:SOL"),
     })
     pnlLogger.logMetrics({ message: "✅ NFT listed for sale", itemId, orderId })
     return orderId
