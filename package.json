@@ -20,16 +20,20 @@
     "@solendprotocol/solend-sdk": "^0.4.2",
     "@tensor-foundation/marketplace": "latest",
     "axios": "^1.6.2",
-    "bn.js": "^5.2.1",
+    "bn.js": "^5.2.2",
     "bs58": "^5.0.0",
     "buffer-layout": "^1.2.2",
     "csv-writer": "^1.6.0",
     "dotenv": "^16.3.1",
-    "winston": "^3.11.0"
+    "winston": "^3.11.0",
+    "@rarible/sdk": "^0.13.200-beta.0",
+    "@rarible/types": "^0.10.7",
+    "@rarible/api-client": "^1.136.0-SNAPSHOT-update-types",
+    "ethers": "^6.15.0"
   },
   "devDependencies": {
     "@types/node": "^20.10.0",
-    "@types/bn.js": "^5.1.5",
+    "@types/bn.js": "^5.2.0",
     "@types/bs58": "^4.0.4",
     "typescript": "^5.3.2",
     "ts-node": "^10.9.1",
