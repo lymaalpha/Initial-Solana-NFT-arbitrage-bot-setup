@@ -1,13 +1,13 @@
-// src/types.ts
+// src/types.ts - ✅ COMPLETE TYPE DEFINITIONS
 import BN from 'bn.js';
 
-export type AuctionHouse = 'MagicEden' | 'Tensor' | 'Rarible';
+export type AuctionHouse = 'MagicEden' | 'Tensor' | 'Rarible' | 'moralis';
 
 export interface NFTListing {
   mint: string;
   auctionHouse: AuctionHouse;
   price: BN;
-  currency: 'SOL'; // Only SOL for consistency
+  currency: 'SOL';
   timestamp: number;
   sellerPubkey: string;
 }
@@ -21,14 +21,39 @@ export interface NFTBid {
   bidderPubkey: string;
 }
 
-// **FIX 1: Enhanced ArbitrageSignal with missing properties**
+// ✅ COMPLETE ArbitrageSignal
 export interface ArbitrageSignal {
   targetListing: NFTListing;
-  targetBid: NFTBid | NFTListing; // Can be bid or listing for arbitrage
+  targetBid: NFTBid | NFTListing;
   estimatedNetProfit: BN;
-  estimatedGrossProfit?: BN;     // ✅ ADDED
-  strategy?: string;             // ✅ ADDED
-  marketplaceIn?: string;        // ✅ ADDED
-  marketplaceOut?: string;       // ✅ ADDED
-  confidence?: number;           // Optional confidence score
+  estimatedGrossProfit?: BN;
+  strategy?: string;
+  marketplaceIn?: string;
+  marketplaceOut?: string;
+  confidence?: number;
+  rawProfit?: BN; // ✅ ADDED for scanForArbitrage
+}
+
+// ✅ MISSING TradeLog type
+export interface TradeLog {
+  success: boolean;
+  signal: ArbitrageSignal;
+  txHash?: string;
+  error?: string;
+  profitSOL?: number;
+  timestamp: number;
+}
+
+// ✅ Config type
+export interface BotConfig {
+  simulateOnly: boolean;
+  minProfitLamports: BN;
+  maxConcurrentTrades: number;
+  scanIntervalMs: number;
+}
+
+// ✅ Metrics type for logging
+export interface MetricsLog {
+  message: string;
+  [key: string]: any;
 }
