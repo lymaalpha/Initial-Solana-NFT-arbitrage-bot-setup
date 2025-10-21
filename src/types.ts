@@ -21,7 +21,6 @@ export interface NFTBid {
   bidderPubkey: string;
 }
 
-// ✅ COMPLETE ArbitrageSignal
 export interface ArbitrageSignal {
   targetListing: NFTListing;
   targetBid: NFTBid | NFTListing;
@@ -31,10 +30,10 @@ export interface ArbitrageSignal {
   marketplaceIn?: string;
   marketplaceOut?: string;
   confidence?: number;
-  rawProfit?: BN; // ✅ ADDED for scanForArbitrage
+  rawProfit?: BN;
+  timestamp?: number;  // ✅ ADDED
 }
 
-// ✅ MISSING TradeLog type
 export interface TradeLog {
   success: boolean;
   signal: ArbitrageSignal;
@@ -42,18 +41,24 @@ export interface TradeLog {
   error?: string;
   profitSOL?: number;
   timestamp: number;
+  mint?: string;
+  buyPrice?: BN;
+  sellPrice?: BN;
+  netProfit?: BN;
+  currency?: string;
+  type?: 'executed' | 'simulated' | 'failed';
+  executorType?: 'flash_loan' | 'wallet';
 }
 
-// ✅ Config type
-export interface BotConfig {
-  simulateOnly: boolean;
-  minProfitLamports: BN;
-  maxConcurrentTrades: number;
-  scanIntervalMs: number;
+// ✅ Marketplace instruction types
+export interface ExecuteSaleParams {
+  connection: Connection;
+  payerKeypair: Keypair;  // ✅ Fixed param name
+  listing: Partial<NFTListing>;
+  bid?: Partial<NFTBid>;
 }
 
-// ✅ Metrics type for logging
-export interface MetricsLog {
-  message: string;
-  [key: string]: any;
+export interface SaleResponse {
+  instructions: TransactionInstruction[];
+  signers: Keypair[];
 }
