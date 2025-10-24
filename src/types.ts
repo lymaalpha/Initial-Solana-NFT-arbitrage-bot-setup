@@ -1,12 +1,15 @@
-// src/types.ts (ABSOLUTE FINAL)
+// src/types.ts (FINAL & CONSISTENT)
 import BN from "bn.js";
 
 export type AuctionHouse = "MagicEden" | "Rarible" | "Moralis" | "Tensor";
+export type Currency = "SOL";
 
 export interface NFTMarketData {
-  mint: string; // ALWAYS A STRING
+  mint: string;
   auctionHouse: AuctionHouse;
   price: BN;
+  currency: Currency;
+  timestamp?: number;
   sellerPubkey?: string;
   bidderPubkey?: string;
 }
@@ -22,7 +25,7 @@ export interface ArbitrageSignal {
   rawProfit: BN;
   strategy: string;
   marketplaceIn: AuctionHouse;
-  marketplaceOut: Auctionhouse;
+  marketplaceOut: AuctionHouse;
   confidence?: number;
   timestamp: number;
 }
@@ -37,4 +40,21 @@ export interface SaleResponse {
   error?: string;
 }
 
-export interface BotConfig { /* ... your full config interface ... */ }
+export interface BotConfig {
+  rpcUrl: string;
+  walletPrivateKey: string;
+  heliusApiKey: string;
+  openseaApiKey: string;
+  moralisApiKey: string;
+  collections: string[];
+  marketplaces: string[];
+  minProfitLamports: BN;
+  feeBufferLamports: BN;
+  scanIntervalMs: number;
+  maxConcurrentTrades: number;
+  minSignals: number;
+  enableJsonLogging: boolean;
+  enableCsvLogging: boolean;
+  logLevel: string;
+  simulateOnly: boolean;
+}
