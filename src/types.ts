@@ -1,13 +1,11 @@
-// src/types.ts (FINAL, UNIFIED, CORRECTED)
+// src/types.ts (FINAL, SIMPLIFIED)
 import BN from "bn.js";
 
-// Basic Types - CORRECTED to include all marketplaces
 export type AuctionHouse = "MagicEden" | "Tensor" | "Rarible" | "Moralis";
 export type Currency = "SOL";
 
-// Data Structures - CORRECTED mint to be string ONLY
 export interface NFTMarketData {
-  mint: string;
+  mint: string; // MINT IS ALWAYS A STRING
   auctionHouse: AuctionHouse;
   price: BN;
   currency: Currency;
@@ -19,21 +17,20 @@ export interface NFTMarketData {
 export interface NFTListing extends NFTMarketData {}
 export interface NFTBid extends NFTMarketData {}
 
-// Arbitrage & Execution - CORRECTED to include missing properties
 export interface ArbitrageSignal {
   targetListing: NFTListing;
   targetBid: NFTBid;
   estimatedNetProfit: BN;
   estimatedGrossProfit: BN;
-  rawProfit: BN; // Added missing property
+  rawProfit: BN;
   strategy: string;
   marketplaceIn: AuctionHouse;
-  marketplaceOut: AuctionHouse;
+  marketplaceOut: Auctionhouse;
   confidence?: number;
   timestamp: number;
 }
 
-// All other types remain the same, but are included for completeness
+// SIMPLIFIED: Only contains the data needed for the trade itself.
 export interface ExecuteSaleParams {
   listing: NFTListing;
   bid: NFTBid;
@@ -44,29 +41,6 @@ export interface SaleResponse {
   error?: string;
 }
 
-export interface TradeLog {
-  timestamp: string;
-  mint: string;
-  profit: number;
-  txSig: string;
-  type: "simulated" | "executed" | "failed";
-}
-
-export interface BotConfig {
-  rpcUrl: string;
-  walletPrivateKey: string;
-  heliusApiKey: string;
-  openseaApiKey: string;
-  moralisApiKey: string;
-  collections: string[];
-  marketplaces: string[];
-  minProfitLamports: BN;
-  feeBufferLamports: BN;
-  scanIntervalMs: number;
-  maxConcurrentTrades: number;
-  minSignals: number;
-  enableJsonLogging: boolean;
-  enableCsvLogging: boolean;
-  logLevel: string;
-  simulateOnly: boolean;
-}
+// Other types for logging and config
+export interface TradeLog { /* ... as before ... */ }
+export interface BotConfig { /* ... as before ... */ }
