@@ -1,20 +1,17 @@
-// src/autoFlashloanExecutor.ts (FINAL, SIMPLIFIED, CORRECTED)
+// src/autoFlashloanExecutor.ts (ABSOLUTE FINAL)
 import { Connection, Keypair } from "@solana/web3.js";
 import BN from "bn.js";
 import { ArbitrageSignal, BotConfig, ExecuteSaleParams, SaleResponse } from "./types";
 import { pnlLogger } from "./pnlLogger";
-import { sleep } from "./utils";
+import { sleep } from "./utils"; // Assumes you have created this file
 
 class FlashloanProgram {
   constructor(private connection: Connection, private wallet: Keypair) {}
 
-  async executeSale(params: ExecuteSaleParams): Promise<SaleResponse> {
-    // The mint is now guaranteed to be a string.
+  async executeSale(params: ExecuteSaleGgParams): Promise<SaleResponse> {
     pnlLogger.logMetrics({ message: `Simulating trade for mint: ${params.listing.mint}` });
     await sleep(1000);
-    return {
-      txSig: "SIMULATED_TX_SIG_" + Math.random().toString(36).substring(7),
-    };
+    return { txSig: "SIMULATED_TX_SIG_" + Math.random().toString(36).substring(7) };
   }
 }
 
@@ -28,7 +25,7 @@ export class AutoFlashloanExecutor {
 
   async executeTrades(signals: ArbitrageSignal[], config: BotConfig): Promise<void> {
     for (const signal of signals.slice(0, config.maxConcurrentTrades)) {
-      const tradeKey = this.getTradeKey(signal);
+      const tradeKey = `${signal.targetListing.mint}_${signal.marketplaceIn}_${signal.marketplaceOut}`;
       if (this.activeTrades.has(tradeKey)) continue;
 
       this.activeTrades.add(tradeKey);
@@ -38,19 +35,15 @@ export class AutoFlashloanExecutor {
     }
   }
 
-  private getTradeKey(signal: ArbitrageSignal): string {
-    // mint is guaranteed to be a string.
-    return `${signal.targetListing.mint}_${signal.targetListing.auctionHouse}_${signal.targetBid.auctionHouse}`;
-  }
-
   private async executeSingleTrade(signal: ArbitrageSignal, config: BotConfig): Promise<void> {
     if (config.simulateOnly) {
       pnlLogger.logMetrics({
         message: `[SIMULATION] Arbitrage opportunity found!`,
         strategy: signal.strategy,
-        mint: signal.targetListing.mint, // It's a string, no .toBase58() needed
+        mint: signal.targetListing.mint,
         profit: signal.estimatedNetProfit.toNumber() / 1e9,
       });
+      await pnlLogger.logPnL(signal, "SIMULATED", "simulated");
       return;
     }
 
@@ -62,12 +55,13 @@ export class AutoFlashloanExecutor {
     try {
       const response = await this.flashloanProgram.executeSale(params);
       if (response.error) {
-        pnlLogger.logError(new Error(response.error), { message: "Trade failed" });
+        await pnlLogger.logPnL(signal, undefined, "failed");
       } else {
-        pnlLogger.logMetrics({ message: "Trade executed", tx: response.txSig });
+        await pnlLogger.logPnL(signal, response.txSig, "executed");
       }
     } catch (error) {
       pnlLogger.logError(error as Error, { message: "Trade execution exception" });
+      await pnlLogger.logPnL(signal, undefined, "failed");
     }
   }
 }
