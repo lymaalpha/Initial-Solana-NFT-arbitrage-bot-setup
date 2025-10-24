@@ -1,4 +1,4 @@
-// src/types.ts (FINAL & CONSISTENT)
+// src/types.ts (ABSOLUTE FINAL - COMPLETE)
 import BN from "bn.js";
 
 export type AuctionHouse = "MagicEden" | "Rarible" | "Moralis" | "Tensor";
@@ -40,6 +40,16 @@ export interface SaleResponse {
   error?: string;
 }
 
+// RE-ADDED THE MISSING INTERFACE
+export interface TradeLog {
+  timestamp: string;
+  mint: string;
+  profit: number;
+  txSig: string;
+  type: "simulated" | "executed" | "failed";
+}
+
+// RE-ADDED THE MISSING INTERFACE
 export interface BotConfig {
   rpcUrl: string;
   walletPrivateKey: string;
