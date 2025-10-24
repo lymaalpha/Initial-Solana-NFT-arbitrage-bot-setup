@@ -1,14 +1,13 @@
-// src/types.ts (FINAL, CLEANED VERSION)
-import { Connection, Keypair, PublicKey } from "@solana/web3.js";
+// src/types.ts (FINAL, UNIFIED, CORRECTED)
 import BN from "bn.js";
 
-// Basic Types
-export type AuctionHouse = "MagicEden" | "Tensor" | "Rarible" | "SimpleHash";
+// Basic Types - CORRECTED to include all marketplaces
+export type AuctionHouse = "MagicEden" | "Tensor" | "Rarible" | "Moralis";
 export type Currency = "SOL";
 
-// Data Structures
+// Data Structures - CORRECTED mint to be string ONLY
 export interface NFTMarketData {
-  mint: string | PublicKey; // Allow both for flexibility
+  mint: string;
   auctionHouse: AuctionHouse;
   price: BN;
   currency: Currency;
@@ -20,12 +19,13 @@ export interface NFTMarketData {
 export interface NFTListing extends NFTMarketData {}
 export interface NFTBid extends NFTMarketData {}
 
-// Arbitrage & Execution
+// Arbitrage & Execution - CORRECTED to include missing properties
 export interface ArbitrageSignal {
   targetListing: NFTListing;
   targetBid: NFTBid;
   estimatedNetProfit: BN;
   estimatedGrossProfit: BN;
+  rawProfit: BN; // Added missing property
   strategy: string;
   marketplaceIn: AuctionHouse;
   marketplaceOut: AuctionHouse;
@@ -33,19 +33,17 @@ export interface ArbitrageSignal {
   timestamp: number;
 }
 
+// All other types remain the same, but are included for completeness
 export interface ExecuteSaleParams {
   listing: NFTListing;
   bid: NFTBid;
-  connection: Connection;
-  payerKeypair: Keypair;
 }
 
 export interface SaleResponse {
-  txSig?: string; // Corrected: Make optional
-  error?: string; // Corrected: Make optional
+  txSig?: string;
+  error?: string;
 }
 
-// Logging
 export interface TradeLog {
   timestamp: string;
   mint: string;
@@ -54,7 +52,6 @@ export interface TradeLog {
   type: "simulated" | "executed" | "failed";
 }
 
-// Configuration
 export interface BotConfig {
   rpcUrl: string;
   walletPrivateKey: string;
