@@ -7,20 +7,20 @@ const RARIBLE_API = "https://api.rarible.org/v0.1";
 
 export async function fetchListings(collectionSlug: string): Promise<NFTListing[]> {
   try {
-    console.log(`🔍 Rarible: Fetching sell orders for ${collectionSlug}...`);
+    console.log(`🔍 Rarible: Fetching listings for ${collectionSlug}...`);
     
     const headers: any = {
       'accept': 'application/json',
-      'X-API-KEY': config.raribleApiKey || '11111111-1111-1111-1111-111111111111' // Use your actual key
+      'X-API-KEY': config.raribleApiKey
     };
 
-    // Get sell orders (listings) for the collection
+    // Get sell orders for the collection
     const response = await axios.get(
       `${RARIBLE_API}/orders/active/sell`,
       {
         params: {
-          blockchain: 'SOLANA',
-          collection: collectionSlug,
+          platform: 'RARIBLE',
+          collectionId: `SOLANA:${collectionSlug}`,
           size: 20,
           status: ['ACTIVE']
         },
@@ -29,7 +29,7 @@ export async function fetchListings(collectionSlug: string): Promise<NFTListing[
       }
     );
 
-    console.log(`📦 Rarible orders response:`, response.data?.orders?.length || 0, 'orders');
+    console.log(`📦 Rarible sell orders:`, response.data?.orders?.length || 0, 'orders');
 
     if (!response.data || !response.data.orders) {
       console.log(`⚠️ Rarible: No sell orders found for ${collectionSlug}`);
@@ -40,24 +40,23 @@ export async function fetchListings(collectionSlug: string): Promise<NFTListing[
 
     for (const order of response.data.orders) {
       try {
-        // Extract price from order - convert from wei/lamports to SOL
-        const makePrice = parseFloat(order.makePrice);
-        const takePrice = parseFloat(order.takePrice);
+        // Extract price information - Rarible returns price in wei/lamports
+        const makeValue = order.make?.value || order.makePrice;
+        const takeValue = order.take?.value || order.takePrice;
         
-        // Use takePrice (what seller receives) or makePrice (what buyer gives)
-        const priceInWei = takePrice || makePrice;
+        const priceInLamports = parseFloat(makeValue || takeValue);
         
-        if (!priceInWei || priceInWei <= 0) {
+        if (!priceInLamports || priceInLamports <= 0) {
           continue;
         }
 
-        // Convert from wei/lamports to SOL (1 SOL = 1e9 lamports)
-        const priceInSOL = priceInWei / 1e9;
+        // Convert from lamports to SOL (1 SOL = 1e9 lamports)
+        const priceInSOL = priceInLamports / 1e9;
 
         const listing: NFTListing = {
           mint: order.make?.tokenId || order.take?.tokenId || `rarible_${Date.now()}`,
           auctionHouse: "Rarible" as AuctionHouse,
-          price: new BN(Math.floor(priceInSOL * 1e9)), // Convert back to lamports for consistency
+          price: new BN(Math.floor(priceInSOL * 1e9)), // Store in lamports for consistency
           currency: "SOL",
           timestamp: Date.now(),
           sellerPubkey: order.maker || ""
@@ -71,14 +70,13 @@ export async function fetchListings(collectionSlug: string): Promise<NFTListing[
       }
     }
 
-    console.log(`✅ Rarible: Found ${listings.length} active sell orders for ${collectionSlug}`);
+    console.log(`✅ Rarible: Found ${listings.length} active listings for ${collectionSlug}`);
     return listings;
 
   } catch (error: any) {
-    console.error(`❌ Rarible sell orders failed for ${collectionSlug}:`, {
+    console.error(`❌ Rarible listings failed for ${collectionSlug}:`, {
       status: error.response?.status,
-      message: error.message,
-      url: error.config?.url
+      message: error.message
     });
 
     return [];
@@ -87,46 +85,48 @@ export async function fetchListings(collectionSlug: string): Promise<NFTListing[
 
 export async function fetchBids(collectionSlug: string): Promise<NFTBid[]> {
   try {
-    console.log(`🔍 Rarible: Fetching bid orders for ${collectionSlug}...`);
+    console.log(`🔍 Rarible: Fetching floor bids for ${collectionSlug}...`);
 
     const headers: any = {
       'accept': 'application/json',
-      'X-API-KEY': config.raribleApiKey || '11111111-1111-1111-1111-111111111111'
+      'X-API-KEY': config.raribleApiKey
     };
 
-    // Get bid orders for the collection
+    // Get floor bids for the collection - this is the correct endpoint!
     const response = await axios.get(
-      `${RARIBLE_API}/orders/active/bid`,
+      `${RARIBLE_API}/orders/floorBids/byCollection`,
       {
         params: {
-          blockchain: 'SOLANA',
-          collection: collectionSlug,
+          platform: 'RARIBLE',
+          collectionId: `SOLANA:${collectionSlug}`,
           size: 15,
-          status: ['ACTIVE']
+          status: ['ACTIVE'],
+          currencies: ['SOLANA_SOL'] // Specify SOL currency
         },
         timeout: 15000,
         headers
       }
     );
 
-    console.log(`📦 Rarible bids response:`, response.data?.orders?.length || 0, 'bids');
+    console.log(`📦 Rarible floor bids:`, response.data?.orders?.length || 0, 'bids');
 
     const bids: NFTBid[] = [];
 
     if (response.data?.orders) {
       for (const order of response.data.orders) {
         try {
-          const makePrice = parseFloat(order.makePrice);
-          const takePrice = parseFloat(order.takePrice);
+          // Extract bid price information
+          const makeValue = order.make?.value || order.makePrice;
+          const takeValue = order.take?.value || order.takePrice;
           
-          const priceInWei = takePrice || makePrice;
+          const priceInLamports = parseFloat(makeValue || takeValue);
           
-          if (!priceInWei || priceInWei <= 0) {
+          if (!priceInLamports || priceInLamports <= 0) {
             continue;
           }
 
-          // Convert from wei/lamports to SOL
-          const priceInSOL = priceInWei / 1e9;
+          // Convert from lamports to SOL
+          const priceInSOL = priceInLamports / 1e9;
 
           bids.push({
             mint: order.take?.tokenId || order.make?.tokenId || `rarible_bid_${Date.now()}`,
@@ -143,19 +143,22 @@ export async function fetchBids(collectionSlug: string): Promise<NFTBid[]> {
       }
     }
 
-    console.log(`✅ Rarible: Found ${bids.length} active bids for ${collectionSlug}`);
+    console.log(`✅ Rarible: Found ${bids.length} floor bids for ${collectionSlug}`);
     return bids;
 
   } catch (error: any) {
-    console.error(`❌ Rarible bid orders failed for ${collectionSlug}:`, error.message);
+    console.error(`❌ Rarible floor bids failed for ${collectionSlug}:`, {
+      status: error.response?.status,
+      message: error.message
+    });
     
-    // Fallback to synthetic bids from listings
+    // Fallback: create synthetic bids from listings
     console.log(`🔄 Rarible: Creating synthetic bids for ${collectionSlug}`);
     const listings = await fetchListings(collectionSlug);
     const bids: NFTBid[] = listings.slice(0, 10).map(listing => ({
       mint: listing.mint,
       auctionHouse: "Rarible" as AuctionHouse,
-      price: new BN(listing.price.muln(90).divn(100)), // 90% of listing price
+      price: new BN(listing.price.muln(88).divn(100)), // 88% of listing price
       currency: "SOL",
       timestamp: Date.now(),
       bidderPubkey: "synthetic_bidder"
