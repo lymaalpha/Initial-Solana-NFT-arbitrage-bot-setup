@@ -1,75 +1,74 @@
-// src/raribleMarketplace.ts - COMPLETE FIXED IMPLEMENTATION
 import { NFTListing, NFTBid, AuctionHouse } from "./types";
 import BN from "bn.js";
+import axios from "axios";
 
-/**
- * Fetch NFT listings from Rarible
- */
+const RARIBLE_API = "https://api.rarible.org/v0.1";
+
 export async function fetchListings(collectionSlug: string): Promise<NFTListing[]> {
   try {
-    console.log(`🔍 Fetching Rarible listings for ${collectionSlug}...`);
-    
-    // Mock implementation - replace with actual Rarible API
-    const mockListings: NFTListing[] = [
+    const response = await axios.get(
+      `${RARIBLE_API}/items/byCollection`,
       {
-        mint: "mockRaribleMint1",
-        auctionHouse: "Rarible" as AuctionHouse,
-        price: new BN(1000000000), // 1 SOL
-        currency: "SOL",
-        timestamp: Date.now(),
-        sellerPubkey: "seller1"
-      },
-      {
-        mint: "mockRaribleMint2", 
-        auctionHouse: "Rarible" as AuctionHouse,
-        price: new BN(1500000000), // 1.5 SOL
-        currency: "SOL",
-        timestamp: Date.now(),
-        sellerPubkey: "seller2"
+        params: {
+          collection: `SOLANA:${collectionSlug}`,
+          size: 100
+        },
+        timeout: 10000
       }
-    ];
+    );
 
-    await new Promise(resolve => setTimeout(resolve, 100)); // Simulate API delay
-    return mockListings;
+    const listings: NFTListing[] = response.data.items
+      .filter((item: any) => item.meta && item.meta.attributes && item.meta.attributes.price)
+      .map((item: any) => ({
+        mint: item.meta.attributes.mint || item.id,
+        auctionHouse: "Rarible" as AuctionHouse,
+        price: new BN(Math.floor(parseFloat(item.meta.attributes.price) * 1e9)),
+        currency: "SOL",
+        timestamp: Date.now(),
+        sellerPubkey: item.sellers?.[0] || ""
+      }));
+
+    console.log(`✅ Rarible: Fetched ${listings.length} listings for ${collectionSlug}`);
+    return listings;
+
   } catch (error) {
-    console.error('❌ Error fetching Rarible listings:', error);
+    console.error(`❌ Rarible listings failed for ${collectionSlug}:`, error);
     return [];
   }
 }
 
-/**
- * Fetch NFT bids from Rarible  
- */
 export async function fetchBids(collectionSlug: string): Promise<NFTBid[]> {
   try {
-    console.log(`🔍 Fetching Rarible bids for ${collectionSlug}...`);
-    
-    // Mock implementation - replace with actual Rarible API
-    const mockBids: NFTBid[] = [
+    // Rarible bids/offers endpoint
+    const response = await axios.get(
+      `${RARIBLE_API}/items/byCollection`,
       {
-        mint: "mockRaribleMint1",
-        auctionHouse: "Rarible" as AuctionHouse,
-        price: new BN(1200000000), // 1.2 SOL
-        currency: "SOL",
-        timestamp: Date.now(),
-        bidderPubkey: "bidder1"
-      },
-      {
-        mint: "mockRaribleMint2",
-        auctionHouse: "Rarible" as AuctionHouse, 
-        price: new BN(1800000000), // 1.8 SOL
-        currency: "SOL",
-        timestamp: Date.now(),
-        bidderPubkey: "bidder2"
+        params: {
+          collection: `SOLANA:${collectionSlug}`,
+          size: 100,
+          showDeleted: false,
+          includeMeta: true
+        },
+        timeout: 10000
       }
-    ];
+    );
 
-    await new Promise(resolve => setTimeout(resolve, 100)); // Simulate API delay
-    return mockBids;
+    const bids: NFTBid[] = response.data.items
+      .filter((item: any) => item.bestBidOrder)
+      .map((item: any) => ({
+        mint: item.meta?.attributes?.mint || item.id,
+        auctionHouse: "Rarible" as AuctionHouse,
+        price: new BN(Math.floor(parseFloat(item.bestBidOrder.makePrice) * 1e9)),
+        currency: "SOL",
+        timestamp: Date.now(),
+        bidderPubkey: item.bestBidOrder.maker || ""
+      }));
+
+    console.log(`✅ Rarible: Fetched ${bids.length} bids for ${collectionSlug}`);
+    return bids;
+
   } catch (error) {
-    console.error('❌ Error fetching Rarible bids:', error);
+    console.error(`❌ Rarible bids failed for ${collectionSlug}:`, error);
     return [];
   }
 }
-
-// Remove any problematic test functions that might be causing issues
