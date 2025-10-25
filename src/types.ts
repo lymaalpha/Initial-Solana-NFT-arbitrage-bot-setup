@@ -1,7 +1,7 @@
-// src/types.ts (UPDATED TO MATCH CONFIG)
+// src/types.ts - MAGIC EDEN & RARIBLE ONLY
 import BN from "bn.js";
 
-export type AuctionHouse = "MagicEden" | "Rarible" | "Moralis" | "Tensor";
+export type AuctionHouse = "MagicEden" | "Rarible";
 export type Currency = "SOL";
 export type BotMode = 'SIMULATION' | 'DRY_RUN' | 'LIVE_TRADING' | 'MAINTENANCE';
 export type LogLevel = 'error' | 'warn' | 'info' | 'debug' | 'trace';
@@ -50,7 +50,6 @@ export interface TradeLog {
   type: "simulated" | "executed" | "failed";
 }
 
-// UPDATED BotConfig to match your config.ts
 export interface BotConfig {
   // Core settings
   mode: BotMode;
@@ -104,8 +103,3 @@ export interface BotConfig {
     errorAlerts: boolean;
   };
 }
-
-// Helper type for simulation mode check
-export type SimulationMode = boolean;
-
-// Remove the old BotConfig interface that had simulateOnly
