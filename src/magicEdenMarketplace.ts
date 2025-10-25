@@ -11,7 +11,7 @@ export async function fetchListings(collectionSlug: string): Promise<NFTListing[
       {
         params: {
           offset: 0,
-          limit: 30  // Smaller for reliability
+          limit: 30
         },
         timeout: 15000,
         headers: {
@@ -40,7 +40,7 @@ export async function fetchListings(collectionSlug: string): Promise<NFTListing[
 
 export async function fetchBids(collectionSlug: string): Promise<NFTBid[]> {
   try {
-    // For Magic Eden, we'll create synthetic bids from listings
+    // For Magic Eden, create synthetic bids from listings
     const listings = await fetchListings(collectionSlug);
     
     // Create bids that are 90% of listing prices
