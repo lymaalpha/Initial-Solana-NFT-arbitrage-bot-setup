@@ -1,4 +1,4 @@
-// src/main.ts (YOUR LOGIC + FINAL STRUCTURE)
+// src/main.ts (FINAL - CORRECT IMPORTS & RATE LIMITING)
 import { Connection, Keypair } from "@solana/web3.js";
 import bs58 from "bs58";
 import { config } from "./config";
@@ -6,8 +6,9 @@ import { pnlLogger } from "./pnlLogger";
 import { scanForArbitrage } from "./scanForArbitrage";
 import { AutoFlashloanExecutor } from "./autoFlashloanExecutor";
 import { ArbitrageSignal, NFTBid, NFTListing } from "./types";
+import { sleep } from "./utils";
 
-// Import working marketplace APIs
+// CORRECTLY IMPORTING NAMED EXPORTS
 import * as MagicEdenAPI from "./magicEdenMarketplace";
 import * as RaribleAPI from "./raribleMarketplace";
 
@@ -38,6 +39,8 @@ async function runBot() {
     const allSignals: ArbitrageSignal[] = [];
 
     for (const collection of COLLECTIONS_CONFIG) {
+      pnlLogger.logMetrics({ message: `🔍 Scanning ${collection.name}...` });
+
       const [meListings, raribleListings, meBids, raribleBids] = await Promise.all([
         safeFetch(() => MagicEdenAPI.fetchListings(collection.magicEden), "MagicEden"),
         safeFetch(() => RaribleAPI.fetchListings(collection.rarible), "Rarible"),
@@ -45,7 +48,12 @@ async function runBot() {
         safeFetch(() => RaribleAPI.fetchBids(collection.rarible), "Rarible"),
       ]);
 
-      const signals = await scanForArbitrage([...meListings, ...raribleListings], [...meBids, ...raribleBids]);
+      await sleep(1000); // 1-second delay between collections to avoid rate limits
+
+      const listings: NFTListing[] = [...meListings, ...raribleListings];
+      const bids: NFTBid[] = [...meBids, ...raribleBids];
+      
+      const signals = await scanForArbitrage(listings, bids);
       if (signals.length > 0) allSignals.push(...signals);
     }
 
@@ -58,7 +66,7 @@ async function runBot() {
     }
 
     pnlLogger.logMetrics({ message: `⏳ Cycle ${cycleCount} complete. Waiting ${config.scanIntervalMs / 1000}s...` });
-    await new Promise(resolve => setTimeout(resolve, config.scanIntervalMs));
+    await sleep(config.scanIntervalMs);
   }
 }
 
