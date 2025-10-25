@@ -1,8 +1,9 @@
+// src/main.ts (UPDATED)
 import { AutoFlashloanExecutor } from "./autoFlashloanExecutor";
 import { pnlLogger } from "./pnlLogger";
 import { ArbitrageSignal, NFTBid, NFTListing, BotConfig, AuctionHouse } from "./types";
 import BN from "bn.js";
-import { config } from "./config";
+import { config, isSimulationMode } from "./config"; // ✅ Import helper
 import { Connection, Keypair } from "@solana/web3.js";
 import bs58 from "bs58";
 
@@ -120,12 +121,11 @@ async function analyzeCollection(collection: { name: string; magicEden: string; 
   }
 }
 
-// Rest of your main.ts remains the same...
 async function runBot() {
   console.log("🚀 Arbitrage Bot Started - Magic Eden ↔ Rarible");
   console.log(`📊 Collections: ${COLLECTIONS.length}`);
   console.log(`💰 Min Profit: ${config.minProfitLamports.toNumber() / 1e9} SOL`);
-  console.log(`🔧 Mode: ${config.simulateOnly ? 'SIMULATION' : 'LIVE'}`);
+  console.log(`🔧 Mode: ${config.mode}`); // ✅ UPDATED: Use config.mode
 
   while (true) {
     cycleCount++;
@@ -150,7 +150,7 @@ async function runBot() {
 
       if (profitableSignals.length > 0) {
         console.log(`🎯 Executing ${profitableSignals.length} ME↔Rarible trades...`);
-        await executor.executeTrades(profitableSignals, config);
+        await executor.executeTrades(profitableSignals, config); // ✅ FIXED: Now compatible
         
         profitableSignals.forEach(signal => {
           totalTrades++;
