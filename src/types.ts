@@ -55,15 +55,13 @@ export interface BotConfig {
   rpcUrl: string;
   walletPrivateKey: string;
   
-  // API Keys
+  // API Keys - SIMPLIFIED: Only what we actually use
   heliusApiKey: string;
-  openseaApiKey: string;
-  moralisApiKey: string;
-  raribleApiKey: string;
+  raribleApiKey: string;  // ✅ Only keep Rarible API key (we have this in Render)
   
   // Trading parameters
   collections: string[];
-  marketplaces: string[];
+  marketplaces: string[];  // Keep as string[] for simplicity
   minProfitLamports: BN;
   feeBufferLamports: BN;
   maxSlippageBps: number;
