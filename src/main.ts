@@ -13,18 +13,32 @@ const connection = new Connection(config.rpcUrl, "confirmed");
 const wallet = Keypair.fromSecretKey(bs58.decode(config.walletPrivateKey));
 const executor = new AutoFlashloanExecutor(connection, wallet);
 
-// ✅ CORRECTED: Using collection SLUGS (not mint addresses)
+// ✅ FIXED: Use only collections that exist on both platforms
 const COLLECTIONS_CONFIG = [
   { name: "Mad Lads", magicEden: "mad_lads", rarible: "mad_lads" },
   { name: "Okay Bears", magicEden: "okay_bears", rarible: "okay_bears" },
   { name: "DeGods", magicEden: "degods", rarible: "degods" },
-  { name: "Tensorians", magicEden: "tensorians", rarible: "tensorians" },
-  { name: "Famous Fox", magicEden: "famous_fox_federation", rarible: "famous_fox_federation" },
+  // Remove problematic collections for now
 ];
 
 let totalProfit = 0;
 let totalTrades = 0;
 let cycleCount = 0;
+let raribleLastCall = 0;
+
+// Rate limiting for Rarible API
+async function rateLimitRarible(): Promise<void> {
+  const now = Date.now();
+  const timeSinceLastCall = now - raribleLastCall;
+  const minDelay = 2000; // 2 seconds between Rarible calls
+  
+  if (timeSinceLastCall < minDelay) {
+    const waitTime = minDelay - timeSinceLastCall;
+    console.log(`⏳ Rate limiting: Waiting ${waitTime}ms before next Rarible call`);
+    await new Promise(resolve => setTimeout(resolve, waitTime));
+  }
+  raribleLastCall = Date.now();
+}
 
 async function safeFetch<T>(
   fn: () => Promise<T[]>,
@@ -33,12 +47,26 @@ async function safeFetch<T>(
   type: string
 ): Promise<T[]> {
   try {
+    // Rate limit Rarible API calls
+    if (source === "Rarible") {
+      await rateLimitRarible();
+    }
+    
     const result = await fn();
     console.log(`✅ ${source} ${type} for ${collection}: ${result.length} items`);
     return result;
   } catch (err: any) {
-    console.error(`❌ ${source} ${type} failed for ${collection}:`, err.message);
-    return [];
+    if (err.response?.status === 429) {
+      console.log(`🚦 ${source} rate limited for ${collection}, waiting 5 seconds...`);
+      await new Promise(resolve => setTimeout(resolve, 5000));
+      return []; // Return empty instead of retrying immediately
+    } else if (err.response?.status === 404) {
+      console.log(`🔍 ${source}: Collection ${collection} not found`);
+      return [];
+    } else {
+      console.error(`❌ ${source} ${type} failed for ${collection}:`, err.message);
+      return [];
+    }
   }
 }
 
@@ -50,24 +78,31 @@ async function analyzeCollection(collection: {
   try {
     console.log(`\n🔍 Scanning ${collection.name}...`);
     
-    // Fetch data from both marketplaces
-    const [meListings, raribleListings] = await Promise.all([
+    // Fetch Magic Eden data first (more reliable)
+    const [meListings, meBids] = await Promise.all([
       safeFetch<NFTListing>(() => fetchMEListings(collection.magicEden), "MagicEden", collection.name, "listings"),
-      safeFetch<NFTListing>(() => fetchRaribleListings(collection.rarible), "Rarible", collection.name, "listings"),
+      safeFetch<NFTBid>(() => fetchMEBids(collection.magicEden), "MagicEden", collection.name, "bids"),
     ]);
 
-    const [meBids, raribleBids] = await Promise.all([
-      safeFetch<NFTBid>(() => fetchMEBids(collection.magicEden), "MagicEden", collection.name, "bids"),
+    // Then fetch Rarible data with delays
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    
+    const [raribleListings, raribleBids] = await Promise.all([
+      safeFetch<NFTListing>(() => fetchRaribleListings(collection.rarible), "Rarible", collection.name, "listings"),
       safeFetch<NFTBid>(() => fetchRaribleBids(collection.rarible), "Rarible", collection.name, "bids"),
     ]);
 
     console.log(`📊 ${collection.name}: ME=${meListings.length}L/${meBids.length}B | Rarible=${raribleListings.length}L/${raribleBids.length}B`);
 
-    const signals: ArbitrageSignal[] = [];
-    const allListings = [...meListings, ...raribleListings];
-    const allBids = [...meBids, ...raribleBids];
+    // If Rarible has no data, skip this collection for now
+    if (raribleListings.length === 0 && raribleBids.length === 0) {
+      console.log(`⚠️ Skipping ${collection.name} - no Rarible data available`);
+      return [];
+    }
 
-    // STRATEGY 1: Buy on Magic Eden, sell to Rarible bid
+    const signals: ArbitrageSignal[] = [];
+
+    // STRATEGY: Only look for opportunities where we have data from both sides
     for (const meListing of meListings) {
       const raribleBid = raribleBids.find(b => b.mint === meListing.mint);
       if (raribleBid && raribleBid.price.gt(meListing.price)) {
@@ -91,7 +126,6 @@ async function analyzeCollection(collection: {
       }
     }
 
-    // STRATEGY 2: Buy on Rarible, sell to Magic Eden bid
     for (const raribleListing of raribleListings) {
       const meBid = meBids.find(b => b.mint === raribleListing.mint);
       if (meBid && meBid.price.gt(raribleListing.price)) {
@@ -141,13 +175,14 @@ async function runBot() {
     try {
       console.log(`\n🔄 CYCLE ${cycleCount} STARTED at ${new Date().toLocaleTimeString()}`);
       
-      // Analyze all collections
-      const collectionPromises = COLLECTIONS_CONFIG.map(analyzeCollection);
-      const results = await Promise.allSettled(collectionPromises);
-      
-      for (const result of results) {
-        if (result.status === 'fulfilled') {
-          allSignals = allSignals.concat(result.value);
+      // Analyze collections sequentially to avoid rate limits
+      for (const collection of COLLECTIONS_CONFIG) {
+        const signals = await analyzeCollection(collection);
+        allSignals = allSignals.concat(signals);
+        
+        // Delay between collections to respect rate limits
+        if (collection !== COLLECTIONS_CONFIG[COLLECTIONS_CONFIG.length - 1]) {
+          await new Promise(resolve => setTimeout(resolve, 2000));
         }
       }
 
@@ -165,25 +200,27 @@ async function runBot() {
         console.log(`\n🎯 EXECUTING ${Math.min(profitableSignals.length, config.maxConcurrentTrades)} TRADES...`);
         await executor.executeTrades(profitableSignals, config);
         
-        // Update metrics
         const executedSignals = profitableSignals.slice(0, config.maxConcurrentTrades);
         executedSignals.forEach(signal => {
           totalTrades++;
           totalProfit += signal.estimatedNetProfit.toNumber() / 1e9;
         });
+        
+        console.log(`💰 Cycle Profit: ${executedSignals.reduce((sum, s) => sum + s.estimatedNetProfit.toNumber() / 1e9, 0).toFixed(4)} SOL`);
       }
 
       const cycleTime = Date.now() - cycleStart;
       console.log(`\n⏱️  CYCLE ${cycleCount} COMPLETED in ${cycleTime}ms`);
       console.log(`📈 TOTAL STATS: ${totalTrades} trades, ${totalProfit.toFixed(4)} SOL profit`);
 
-      // Wait for next cycle
-      const remainingTime = Math.max(1000, config.scanIntervalMs - cycleTime);
+      // Adaptive delay based on cycle time
+      const remainingTime = Math.max(5000, config.scanIntervalMs - cycleTime); // Minimum 5 seconds
+      console.log(`💤 Waiting ${remainingTime}ms until next cycle...`);
       await new Promise(resolve => setTimeout(resolve, remainingTime));
 
     } catch (err: any) {
       console.error(`💥 CYCLE ${cycleCount} FAILED:`, err.message);
-      await new Promise(resolve => setTimeout(resolve, config.scanIntervalMs));
+      await new Promise(resolve => setTimeout(resolve, 10000)); // Wait 10 seconds on error
     }
   }
 }
@@ -192,10 +229,6 @@ async function runBot() {
 process.on("SIGINT", () => {
   console.log(`\n🛑 SHUTDOWN - ${totalTrades} trades, ${totalProfit.toFixed(4)} SOL profit`);
   process.exit(0);
-});
-
-process.on("unhandledRejection", (reason, promise) => {
-  console.error('❌ UNHANDLED REJECTION:', reason);
 });
 
 runBot().catch(err => {
