@@ -1,4 +1,4 @@
-// src/main.ts (FINAL - CORRECT IMPORT SYNTAX)
+// src/main.ts (FINAL, FINAL VERSION - INCORPORATING YOUR FIX)
 import { Connection, Keypair } from "@solana/web3.js";
 import bs58 from "bs58";
 import { config } from "./config";
@@ -8,9 +8,9 @@ import { AutoFlashloanExecutor } from "./autoFlashloanExecutor";
 import { ArbitrageSignal, NFTBid, NFTListing } from "./types";
 import { sleep } from "./utils";
 
-// CORRECTED IMPORT SYNTAX FOR FILES WITH A DEFAULT EXPORT
-import MagicEdenAPI from "./magicEdenMarketplace";
-import RaribleAPI from "./raribleMarketplace";
+// ✅ YOUR CORRECTED IMPORT LOGIC
+import { fetchListings as fetchMEListings, fetchBids as fetchMEBids } from "./magicEdenMarketplace";
+import { fetchListings as fetchRaribleListings, fetchBids as fetchRaribleBids } from "./raribleMarketplace";
 
 const connection = new Connection(config.rpcUrl, "confirmed");
 const wallet = Keypair.fromSecretKey(bs58.decode(config.walletPrivateKey));
@@ -40,22 +40,27 @@ async function runBot() {
     for (const collection of COLLECTIONS_CONFIG) {
       pnlLogger.logMetrics({ message: `🔍 Scanning ${collection.name}...` });
 
-      const results = await Promise.allSettled([
-        safeFetch(() => MagicEdenAPI.fetchListings(collection.magicEden), "MagicEden"),
-        safeFetch(() => RaribleAPI.fetchListings(collection.rarible), "Rarible"),
-        safeFetch(() => MagicEdenAPI.fetchBids(collection.magicEden), "MagicEden"),
-        safeFetch(() => RaribleAPI.fetchBids(collection.rarible), "Rarible"),
+      // ✅ YOUR CORRECTED FUNCTION CALLS
+      const [meListings, raribleListings, meBids, raribleBids] = await Promise.all([
+        safeFetch(() => fetchMEListings(collection.magicEden), "MagicEden"),
+        safeFetch(() => fetchRaribleListings(collection.rarible), "Rarible"),
+        safeFetch(() => fetchMEBids(collection.magicEden), "MagicEden"),
+        safeFetch(() => fetchRaribleBids(collection.rarible), "Rarible"),
       ]);
 
-      await sleep(1000);
+      const listings: NFTListing[] = [...meListings, ...raribleListings];
+      const bids: NFTBid[] = [...meBids, ...raribleBids];
 
-      const meListings: NFTListing[] = results[0].status === 'fulfilled' ? results[0].value as NFTListing[] : [];
-      const raribleListings: NFTListing[] = results[1].status === 'fulfilled' ? results[1].value as NFTListing[] : [];
-      const meBids: NFTBid[] = results[2].status === 'fulfilled' ? results[2].value as NFTBid[] : [];
-      const raribleBids: NFTBid[] = results[3].status === 'fulfilled' ? results[3].value as NFTBid[] : [];
+      pnlLogger.logMetrics({
+        message: `📊 Data collected for ${collection.name}`,
+        magicEden: `${meListings.length}L / ${meBids.length}B`,
+        rarible: `${raribleListings.length}L / ${raribleBids.length}B`,
+      });
 
-      const signals = await scanForArbitrage([...meListings, ...raribleListings], [...meBids, ...raribleBids]);
-      if (signals.length > 0) allSignals.push(...signals);
+      const signals = await scanForArbitrage(listings, bids);
+      if (signals.length > 0) {
+        allSignals.push(...signals);
+      }
     }
 
     if (allSignals.length > 0) {
