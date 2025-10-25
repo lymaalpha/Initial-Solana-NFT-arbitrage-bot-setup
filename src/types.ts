@@ -1,8 +1,10 @@
-// src/types.ts (ABSOLUTE FINAL - COMPLETE)
+// src/types.ts (UPDATED TO MATCH CONFIG)
 import BN from "bn.js";
 
 export type AuctionHouse = "MagicEden" | "Rarible" | "Moralis" | "Tensor";
 export type Currency = "SOL";
+export type BotMode = 'SIMULATION' | 'DRY_RUN' | 'LIVE_TRADING' | 'MAINTENANCE';
+export type LogLevel = 'error' | 'warn' | 'info' | 'debug' | 'trace';
 
 export interface NFTMarketData {
   mint: string;
@@ -40,7 +42,6 @@ export interface SaleResponse {
   error?: string;
 }
 
-// RE-ADDED THE MISSING INTERFACE
 export interface TradeLog {
   timestamp: string;
   mint: string;
@@ -49,22 +50,62 @@ export interface TradeLog {
   type: "simulated" | "executed" | "failed";
 }
 
-// RE-ADDED THE MISSING INTERFACE
+// UPDATED BotConfig to match your config.ts
 export interface BotConfig {
+  // Core settings
+  mode: BotMode;
   rpcUrl: string;
   walletPrivateKey: string;
+  
+  // API Keys
   heliusApiKey: string;
   openseaApiKey: string;
   moralisApiKey: string;
+  
+  // Trading parameters
   collections: string[];
   marketplaces: string[];
   minProfitLamports: BN;
   feeBufferLamports: BN;
+  maxSlippageBps: number;
+  
+  // Execution limits
   scanIntervalMs: number;
   maxConcurrentTrades: number;
   minSignals: number;
+  maxGasPerTradeLamports: BN;
+  
+  // Risk management
+  riskLimits: {
+    maxDailyLossLamports: BN;
+    maxTradesPerHour: number;
+    cooloffAfterFailureMs: number;
+    enableCircuitBreaker: boolean;
+  };
+  
+  // Logging
   enableJsonLogging: boolean;
   enableCsvLogging: boolean;
-  logLevel: string;
-  simulateOnly: boolean;
+  enableSheetsLogging: boolean;
+  logLevel: LogLevel;
+  
+  // Marketplace-specific
+  marketplaceSettings: {
+    timeoutMs: number;
+    retryAttempts: number;
+    rateLimitDelayMs: number;
+  };
+  
+  // Notifications
+  notifications: {
+    enabled: boolean;
+    webhookUrl?: string;
+    minProfitAlertSOL: number;
+    errorAlerts: boolean;
+  };
 }
+
+// Helper type for simulation mode check
+export type SimulationMode = boolean;
+
+// Remove the old BotConfig interface that had simulateOnly
