@@ -11,11 +11,11 @@ export async function fetchListings(collectionSlug: string): Promise<NFTListing[
       {
         params: {
           offset: 0,
-          limit: 50 // Reduced for stability
+          limit: 30  // Smaller for reliability
         },
         timeout: 15000,
         headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+          'User-Agent': 'Arbitrage-Bot/1.0'
         }
       }
     );
@@ -40,36 +40,20 @@ export async function fetchListings(collectionSlug: string): Promise<NFTListing[
 
 export async function fetchBids(collectionSlug: string): Promise<NFTBid[]> {
   try {
-    // Magic Eden doesn't have a reliable bids endpoint, so we'll use activities
-    const response = await axios.get(
-      `${MAGIC_EDEN_API}/collections/${collectionSlug}/activities`,
-      {
-        params: {
-          offset: 0,
-          limit: 50,
-          type: "buyNow" // Use buyNow activities as proxy for current market
-        },
-        timeout: 15000,
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-        }
-      }
-    );
+    // For Magic Eden, we'll create synthetic bids from listings
+    const listings = await fetchListings(collectionSlug);
+    
+    // Create bids that are 90% of listing prices
+    const bids: NFTBid[] = listings.slice(0, 20).map(listing => ({
+      mint: listing.mint,
+      auctionHouse: "MagicEden" as AuctionHouse,
+      price: new BN(listing.price.muln(90).divn(100)), // 90% as bid
+      currency: "SOL",
+      timestamp: Date.now(),
+      bidderPubkey: "synthetic_bidder_me"
+    }));
 
-    // Use recent sales as proxy for bid levels
-    const bids: NFTBid[] = response.data
-      .filter((activity: any) => activity.type === "buyNow")
-      .slice(0, 20) // Take most recent 20
-      .map((activity: any) => ({
-        mint: activity.tokenMint,
-        auctionHouse: "MagicEden" as AuctionHouse,
-        price: new BN(Math.floor(activity.price * 1e9 * 1.05)), // Add 5% as potential bid
-        currency: "SOL",
-        timestamp: Date.now(),
-        bidderPubkey: activity.buyer || ""
-      }));
-
-    console.log(`✅ Magic Eden: Fetched ${bids.length} bid proxies for ${collectionSlug}`);
+    console.log(`✅ Magic Eden: Created ${bids.length} synthetic bids for ${collectionSlug}`);
     return bids;
 
   } catch (error: any) {
