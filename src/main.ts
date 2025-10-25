@@ -1,13 +1,21 @@
-import { scanForArbitrage } from "./scanForArbitrage";
-import { executeBatch } from "./autoFlashloanExecutor";
+import { AutoFlashloanExecutor } from "./autoFlashloanExecutor"; // ✅ Import the class
 import { pnlLogger } from "./pnlLogger";
 import { ArbitrageSignal, NFTBid, NFTListing, TradeLog, BotConfig, AuctionHouse } from "./types";
 import BN from "bn.js";
-import { config } from "./config"; // Use your actual config
+import { config } from "./config";
+import { Connection, Keypair } from "@solana/web3.js";
+import bs58 from "bs58";
 
 // ✅ Import marketplace functions
 import { fetchListings as fetchMEListings, fetchBids as fetchMEBids } from "./magicEdenMarketplace";
 import { fetchListings as fetchRaribleListings, fetchBids as fetchRaribleBids } from "./raribleMarketplace";
+
+// ✅ Initialize connection and wallet
+const connection = new Connection(config.rpcUrl, "confirmed");
+const wallet = Keypair.fromSecretKey(bs58.decode(config.walletPrivateKey));
+
+// ✅ Initialize the executor
+const executor = new AutoFlashloanExecutor(connection, wallet);
 
 const COLLECTIONS = [
   { name: "Mad Lads", magicEden: "mad_lads", rarible: "mad_lads" },
@@ -189,42 +197,20 @@ async function runBot() {
 
       const profitableSignals = allSignals
         .filter(s => s.estimatedNetProfit.gt(config.minProfitLamports))
-        .sort((a, b) => b.estimatedNetProfit.sub(a.estimatedNetProfit).toNumber())
-        .slice(0, config.maxConcurrentTrades);
+        .sort((a, b) => b.estimatedNetProfit.sub(a.estimatedNetProfit).toNumber());
 
       console.log(`📡 Cycle ${cycleCount} - Signals: ${allSignals.length}, Profitable: ${profitableSignals.length}`);
 
-      if (profitableSignals.length > 0 && !config.simulateOnly) {
-        for (const signal of profitableSignals) {
-          const profitSOL = signal.estimatedNetProfit.toNumber() / 1e9;
-          
-          console.log(`🎯 Executing ${signal.strategy}`, {
-            mint: signal.targetListing.mint.slice(0, 8) + '...',
-            buyPrice: (signal.targetListing.price.toNumber() / 1e9).toFixed(4),
-            sellPrice: (signal.targetBid.price.toNumber() / 1e9).toFixed(4),
-            profit: profitSOL.toFixed(4)
-          });
-
-          try {
-            // Log the trade
-            const tradeLog: TradeLog = {
-              timestamp: new Date().toISOString(),
-              mint: signal.targetListing.mint,
-              profit: profitSOL,
-              txSig: 'simulated_tx', // Will be replaced with real tx
-              type: 'simulated'
-            };
-
-            await pnlLogger.logPnL(signal, 'simulated_tx', 'executed');
-            
-            totalTrades++;
-            totalProfit += profitSOL;
-          } catch (execError: unknown) {
-            console.error(`Trade execution failed:`, execError);
-          }
-
-          await new Promise(resolve => setTimeout(resolve, 2000));
-        }
+      // ✅ Use the executor instead of executeBatch
+      if (profitableSignals.length > 0) {
+        console.log(`🎯 Executing ${profitableSignals.length} trades...`);
+        await executor.executeTrades(profitableSignals, config);
+        
+        // Track metrics
+        profitableSignals.forEach(signal => {
+          totalTrades++;
+          totalProfit += signal.estimatedNetProfit.toNumber() / 1e9;
+        });
       }
 
     } catch (err: unknown) {
