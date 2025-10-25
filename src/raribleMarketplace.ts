@@ -1,169 +1,84 @@
-import { NFTListing, NFTBid, AuctionHouse } from "./types";
-import BN from "bn.js";
-import axios from "axios";
-import { config } from "./config";
+// src/raribleMarketplace.ts (FINAL - USING YOUR POST/SEARCH DISCOVERY)
+import axios from 'axios';
+import BN from 'bn.js';
+import { NFTListing, NFTBid } from './types';
+import { pnlLogger } from './pnlLogger';
 
-const RARIBLE_API = "https://api.rarible.org/v0.1";
+// Using the correct domain you discovered
+const RARIBLE_API_BASE = 'https://api.rarible.org';
+const headers = {
+  'Accept': 'application/json',
+  'Content-Type': 'application/json',
+  'X-API-KEY': process.env.RARIBLE_API_KEY || '',
+};
 
-export async function fetchListings(collectionSlug: string): Promise<NFTListing[]> {
+// This function is now built entirely on your discovery.
+async function searchRarible(collectionId: string, sort: 'PRICE_ASC' | 'PRICE_DESC' ): Promise<any[]> {
+  const url = `${RARIBLE_API_BASE}/v0.1/items/search`;
+  const data = {
+    filter: {
+      "@type": "by_collection",
+      collection: collectionId,
+    },
+    size: 50,
+    sort: sort,
+  };
+
   try {
-    console.log(`🔍 Rarible: Fetching listings for ${collectionSlug}...`);
-    
-    const headers: any = {
-      'accept': 'application/json',
-      'X-API-KEY': config.raribleApiKey
-    };
-
-    // Get sell orders for the collection
-    const response = await axios.get(
-      `${RARIBLE_API}/orders/active/sell`,
-      {
-        params: {
-          platform: 'RARIBLE',
-          collectionId: `SOLANA:${collectionSlug}`,
-          size: 20,
-          status: ['ACTIVE']
-        },
-        timeout: 15000,
-        headers
-      }
-    );
-
-    console.log(`📦 Rarible sell orders:`, response.data?.orders?.length || 0, 'orders');
-
-    if (!response.data || !response.data.orders) {
-      console.log(`⚠️ Rarible: No sell orders found for ${collectionSlug}`);
-      return [];
-    }
-
-    const listings: NFTListing[] = [];
-
-    for (const order of response.data.orders) {
-      try {
-        // Extract price information - Rarible returns price in wei/lamports
-        const makeValue = order.make?.value || order.makePrice;
-        const takeValue = order.take?.value || order.takePrice;
-        
-        const priceInLamports = parseFloat(makeValue || takeValue);
-        
-        if (!priceInLamports || priceInLamports <= 0) {
-          continue;
-        }
-
-        // Convert from lamports to SOL (1 SOL = 1e9 lamports)
-        const priceInSOL = priceInLamports / 1e9;
-
-        const listing: NFTListing = {
-          mint: order.make?.tokenId || order.take?.tokenId || `rarible_${Date.now()}`,
-          auctionHouse: "Rarible" as AuctionHouse,
-          price: new BN(Math.floor(priceInSOL * 1e9)), // Store in lamports for consistency
-          currency: "SOL",
-          timestamp: Date.now(),
-          sellerPubkey: order.maker || ""
-        };
-
-        listings.push(listing);
-
-      } catch (itemError) {
-        console.log(`⚠️ Rarible: Skipping invalid order in ${collectionSlug}`);
-        continue;
-      }
-    }
-
-    console.log(`✅ Rarible: Found ${listings.length} active listings for ${collectionSlug}`);
-    return listings;
-
-  } catch (error: any) {
-    console.error(`❌ Rarible listings failed for ${collectionSlug}:`, {
-      status: error.response?.status,
-      message: error.message
-    });
-
+    const response = await axios.post(url, data, { headers, timeout: 15000 });
+    return response.data?.items || [];
+  } catch (err: any) {
+    pnlLogger.logError(err, { message: `Rarible search failed`, url, collection: collectionId, error: err.response?.status });
     return [];
   }
 }
 
-export async function fetchBids(collectionSlug: string): Promise<NFTBid[]> {
-  try {
-    console.log(`🔍 Rarible: Fetching floor bids for ${collectionSlug}...`);
+export async function fetchListings(collectionId: string): Promise<NFTListing[]> {
+  const items = await searchRarible(collectionId, 'PRICE_ASC');
+  const listings: NFTListing[] = [];
 
-    const headers: any = {
-      'accept': 'application/json',
-      'X-API-KEY': config.raribleApiKey
-    };
-
-    // Get floor bids for the collection - this is the correct endpoint!
-    const response = await axios.get(
-      `${RARIBLE_API}/orders/floorBids/byCollection`,
-      {
-        params: {
-          platform: 'RARIBLE',
-          collectionId: `SOLANA:${collectionSlug}`,
-          size: 15,
-          status: ['ACTIVE'],
-          currencies: ['SOLANA_SOL'] // Specify SOL currency
-        },
-        timeout: 15000,
-        headers
-      }
-    );
-
-    console.log(`📦 Rarible floor bids:`, response.data?.orders?.length || 0, 'bids');
-
-    const bids: NFTBid[] = [];
-
-    if (response.data?.orders) {
-      for (const order of response.data.orders) {
-        try {
-          // Extract bid price information
-          const makeValue = order.make?.value || order.makePrice;
-          const takeValue = order.take?.value || order.takePrice;
-          
-          const priceInLamports = parseFloat(makeValue || takeValue);
-          
-          if (!priceInLamports || priceInLamports <= 0) {
-            continue;
-          }
-
-          // Convert from lamports to SOL
-          const priceInSOL = priceInLamports / 1e9;
-
-          bids.push({
-            mint: order.take?.tokenId || order.make?.tokenId || `rarible_bid_${Date.now()}`,
-            auctionHouse: "Rarible" as AuctionHouse,
-            price: new BN(Math.floor(priceInSOL * 1e9)),
-            currency: "SOL",
-            timestamp: Date.now(),
-            bidderPubkey: order.maker || ""
-          });
-
-        } catch (bidError) {
-          continue;
-        }
-      }
+  for (const item of items) {
+    if (item.bestSellOrder?.take?.value && item.bestSellOrder?.maker) {
+      listings.push({
+        mint: item.id.split(':')[1],
+        auctionHouse: 'Rarible',
+        price: new BN(item.bestSellOrder.take.value),
+        currency: 'SOL',
+        timestamp: Date.parse(item.bestSellOrder.lastUpdatedAt),
+        sellerPubkey: item.bestSellOrder.maker,
+      });
     }
-
-    console.log(`✅ Rarible: Found ${bids.length} floor bids for ${collectionSlug}`);
-    return bids;
-
-  } catch (error: any) {
-    console.error(`❌ Rarible floor bids failed for ${collectionSlug}:`, {
-      status: error.response?.status,
-      message: error.message
-    });
-    
-    // Fallback: create synthetic bids from listings
-    console.log(`🔄 Rarible: Creating synthetic bids for ${collectionSlug}`);
-    const listings = await fetchListings(collectionSlug);
-    const bids: NFTBid[] = listings.slice(0, 10).map(listing => ({
-      mint: listing.mint,
-      auctionHouse: "Rarible" as AuctionHouse,
-      price: new BN(listing.price.muln(88).divn(100)), // 88% of listing price
-      currency: "SOL",
-      timestamp: Date.now(),
-      bidderPubkey: "synthetic_bidder"
-    }));
-
-    return bids;
   }
+  return listings;
+}
+
+export async function fetchBids(collectionId: string): Promise<NFTBid[]> {
+  const items = await searchRarible(collectionId, 'PRICE_DESC'); // Bids are often on higher-value items
+  const bids: NFTBid[] = [];
+
+  for (const item of items) {
+    if (item.bestBidOrder?.make?.value && item.bestBidOrder?.maker) {
+      bids.push({
+        mint: item.id.split(':')[1],
+        auctionHouse: 'Rarible',
+        price: new BN(item.bestBidOrder.make.value),
+        currency: 'SOL',
+        timestamp: Date.parse(item.bestBidOrder.lastUpdatedAt),
+        bidderPubkey: item.bestBidOrder.maker,
+      });
+    }
+  }
+  
+  // If no direct bids are found, use your brilliant fallback logic
+  if (bids.length === 0) {
+      pnlLogger.logMetrics({ message: "Rarible: No direct bids found, creating synthetic bids." });
+      const listings = await fetchListings(collectionId);
+      return listings.slice(0, 20).map(listing => ({
+          ...listing,
+          price: new BN(listing.price.muln(88).divn(100)), // 88% of listing price
+          bidderPubkey: "synthetic_bidder",
+      }));
+  }
+  
+  return bids;
 }
