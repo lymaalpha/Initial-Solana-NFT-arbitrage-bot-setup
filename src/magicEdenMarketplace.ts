@@ -1,73 +1,70 @@
-// src/magicEdenMarketplace.ts - COMPLETE FIXED IMPLEMENTATION
 import { NFTListing, NFTBid, AuctionHouse } from "./types";
 import BN from "bn.js";
+import axios from "axios";
 
-/**
- * Fetch NFT listings from Magic Eden
- */
+const MAGIC_EDEN_API = "https://api-mainnet.magiceden.io/v2";
+
 export async function fetchListings(collectionSlug: string): Promise<NFTListing[]> {
   try {
-    console.log(`🔍 Fetching Magic Eden listings for ${collectionSlug}...`);
-    
-    // Mock implementation - replace with actual Magic Eden API
-    const mockListings: NFTListing[] = [
+    const response = await axios.get(
+      `${MAGIC_EDEN_API}/collections/${collectionSlug}/listings`,
       {
-        mint: "mockMEMint1",
-        auctionHouse: "MagicEden" as AuctionHouse,
-        price: new BN(900000000), // 0.9 SOL
-        currency: "SOL", 
-        timestamp: Date.now(),
-        sellerPubkey: "me_seller1"
-      },
-      {
-        mint: "mockMEMint2",
-        auctionHouse: "MagicEden" as AuctionHouse,
-        price: new BN(1400000000), // 1.4 SOL
-        currency: "SOL",
-        timestamp: Date.now(),
-        sellerPubkey: "me_seller2"
+        params: {
+          offset: 0,
+          limit: 100 // Adjust based on your needs
+        },
+        timeout: 10000
       }
-    ];
+    );
 
-    await new Promise(resolve => setTimeout(resolve, 100)); // Simulate API delay
-    return mockListings;
+    const listings: NFTListing[] = response.data.map((item: any) => ({
+      mint: item.tokenMint,
+      auctionHouse: "MagicEden" as AuctionHouse,
+      price: new BN(Math.floor(item.price * 1e9)), // Convert SOL to lamports
+      currency: "SOL",
+      timestamp: Date.now(),
+      sellerPubkey: item.seller
+    }));
+
+    console.log(`✅ Magic Eden: Fetched ${listings.length} listings for ${collectionSlug}`);
+    return listings;
+
   } catch (error) {
-    console.error('❌ Error fetching Magic Eden listings:', error);
+    console.error(`❌ Magic Eden listings failed for ${collectionSlug}:`, error);
     return [];
   }
 }
 
-/**
- * Fetch NFT bids from Magic Eden
- */
 export async function fetchBids(collectionSlug: string): Promise<NFTBid[]> {
   try {
-    console.log(`🔍 Fetching Magic Eden bids for ${collectionSlug}...`);
-    
-    // Mock implementation - replace with actual Magic Eden API
-    const mockBids: NFTBid[] = [
+    const response = await axios.get(
+      `${MAGIC_EDEN_API}/collections/${collectionSlug}/activities`,
       {
-        mint: "mockMEMint1", 
-        auctionHouse: "MagicEden" as AuctionHouse,
-        price: new BN(1100000000), // 1.1 SOL
-        currency: "SOL",
-        timestamp: Date.now(),
-        bidderPubkey: "me_bidder1"
-      },
-      {
-        mint: "mockMEMint2",
-        auctionHouse: "MagicEden" as AuctionHouse,
-        price: new BN(1600000000), // 1.6 SOL
-        currency: "SOL",
-        timestamp: Date.now(),
-        bidderPubkey: "me_bidder2"
+        params: {
+          offset: 0,
+          limit: 100,
+          type: "bid" // Filter for bids only
+        },
+        timeout: 10000
       }
-    ];
+    );
 
-    await new Promise(resolve => setTimeout(resolve, 100)); // Simulate API delay
-    return mockBids;
+    const bids: NFTBid[] = response.data
+      .filter((activity: any) => activity.type === "bid")
+      .map((activity: any) => ({
+        mint: activity.tokenMint,
+        auctionHouse: "MagicEden" as AuctionHouse,
+        price: new BN(Math.floor(activity.price * 1e9)),
+        currency: "SOL",
+        timestamp: Date.now(),
+        bidderPubkey: activity.buyer
+      }));
+
+    console.log(`✅ Magic Eden: Fetched ${bids.length} bids for ${collectionSlug}`);
+    return bids;
+
   } catch (error) {
-    console.error('❌ Error fetching Magic Eden bids:', error);
+    console.error(`❌ Magic Eden bids failed for ${collectionSlug}:`, error);
     return [];
   }
 }
