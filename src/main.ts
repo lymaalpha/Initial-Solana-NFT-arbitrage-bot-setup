@@ -1,20 +1,21 @@
-import { AutoFlashloanExecutor } from "./autoFlashloanExecutor"; // ✅ Import the class
+// src/main.ts (FINAL - COMPATIBLE WITH YOUR TYPES)
+import { AutoFlashloanExecutor } from "./autoFlashloanExecutor";
 import { pnlLogger } from "./pnlLogger";
-import { ArbitrageSignal, NFTBid, NFTListing, TradeLog, BotConfig, AuctionHouse } from "./types";
+import { ArbitrageSignal, NFTBid, NFTListing, BotConfig, AuctionHouse } from "./types";
 import BN from "bn.js";
 import { config } from "./config";
 import { Connection, Keypair } from "@solana/web3.js";
 import bs58 from "bs58";
 
-// ✅ Import marketplace functions
+// Import marketplace functions
 import { fetchListings as fetchMEListings, fetchBids as fetchMEBids } from "./magicEdenMarketplace";
 import { fetchListings as fetchRaribleListings, fetchBids as fetchRaribleBids } from "./raribleMarketplace";
 
-// ✅ Initialize connection and wallet
+// Initialize connection and wallet
 const connection = new Connection(config.rpcUrl, "confirmed");
 const wallet = Keypair.fromSecretKey(bs58.decode(config.walletPrivateKey));
 
-// ✅ Initialize the executor
+// Initialize the executor
 const executor = new AutoFlashloanExecutor(connection, wallet);
 
 const COLLECTIONS = [
@@ -27,7 +28,7 @@ let totalProfit = 0;
 let totalTrades = 0;
 let cycleCount = 0;
 
-// ✅ Fixed safeFetch function
+// Safe fetch function with error handling
 async function safeFetch<T>(
   fn: () => Promise<T[]>,
   source: string,
@@ -83,7 +84,7 @@ async function analyzeCollection(collection: { name: string; magicEden: string; 
 
     const signals: ArbitrageSignal[] = [];
 
-    // ✅ Strategy 1: Buy low on MagicEden, sell high on Rarible bids
+    // Strategy 1: Buy low on MagicEden, sell high on Rarible bids
     for (const meListing of meListings) {
       const raribleBid = raribleBids.find(b => b.mint === meListing.mint);
       if (raribleBid && raribleBid.price.gt(meListing.price)) {
@@ -108,7 +109,7 @@ async function analyzeCollection(collection: { name: string; magicEden: string; 
       }
     }
 
-    // ✅ Strategy 2: Buy low on Rarible, sell high on MagicEden bids
+    // Strategy 2: Buy low on Rarible, sell high on MagicEden bids
     for (const raribleListing of raribleListings) {
       const meBid = meBids.find(b => b.mint === raribleListing.mint);
       if (meBid && meBid.price.gt(raribleListing.price)) {
@@ -133,7 +134,7 @@ async function analyzeCollection(collection: { name: string; magicEden: string; 
       }
     }
 
-    // ✅ Strategy 3: Buy low listing, sell to high bid
+    // Strategy 3: Buy low listing, sell to high bid
     const allListings = [...meListings, ...raribleListings];
     const allBids = [...meBids, ...raribleBids];
     
@@ -201,7 +202,7 @@ async function runBot() {
 
       console.log(`📡 Cycle ${cycleCount} - Signals: ${allSignals.length}, Profitable: ${profitableSignals.length}`);
 
-      // ✅ Use the executor instead of executeBatch
+      // Use the executor to handle trades
       if (profitableSignals.length > 0) {
         console.log(`🎯 Executing ${profitableSignals.length} trades...`);
         await executor.executeTrades(profitableSignals, config);
@@ -213,6 +214,9 @@ async function runBot() {
         });
       }
 
+      const cycleTime = Date.now() - start;
+      console.log(`⏱️  Cycle ${cycleCount} completed in ${cycleTime}ms`);
+
     } catch (err: unknown) {
       console.error(`Cycle ${cycleCount} failed:`, err);
     }
@@ -222,8 +226,12 @@ async function runBot() {
 }
 
 process.on("SIGINT", () => {
-  console.log(`🛑 Shutdown - Total Profit: ${totalProfit.toFixed(4)} SOL, Trades: ${totalTrades}`);
+  console.log(`\n🛑 Shutdown - Total Profit: ${totalProfit.toFixed(4)} SOL, Trades: ${totalTrades}, Cycles: ${cycleCount}`);
   process.exit(0);
+});
+
+process.on("unhandledRejection", (reason, promise) => {
+  console.error('Unhandled Rejection at:', promise, 'reason:', reason);
 });
 
 runBot().catch(err => {
