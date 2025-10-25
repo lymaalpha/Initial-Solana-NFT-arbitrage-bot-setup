@@ -11,7 +11,7 @@ export async function fetchListings(collectionSlug: string): Promise<NFTListing[
       {
         params: {
           offset: 0,
-          limit: 100 // Adjust based on your needs
+          limit: 100
         },
         timeout: 10000
       }
@@ -23,7 +23,7 @@ export async function fetchListings(collectionSlug: string): Promise<NFTListing[
       price: new BN(Math.floor(item.price * 1e9)), // Convert SOL to lamports
       currency: "SOL",
       timestamp: Date.now(),
-      sellerPubkey: item.seller
+      sellerPubkey: item.seller || ""
     }));
 
     console.log(`✅ Magic Eden: Fetched ${listings.length} listings for ${collectionSlug}`);
@@ -37,13 +37,14 @@ export async function fetchListings(collectionSlug: string): Promise<NFTListing[
 
 export async function fetchBids(collectionSlug: string): Promise<NFTBid[]> {
   try {
+    // Magic Eden doesn't have a direct bids endpoint, so we use activities
     const response = await axios.get(
       `${MAGIC_EDEN_API}/collections/${collectionSlug}/activities`,
       {
         params: {
           offset: 0,
           limit: 100,
-          type: "bid" // Filter for bids only
+          type: "bid"
         },
         timeout: 10000
       }
@@ -57,7 +58,7 @@ export async function fetchBids(collectionSlug: string): Promise<NFTBid[]> {
         price: new BN(Math.floor(activity.price * 1e9)),
         currency: "SOL",
         timestamp: Date.now(),
-        bidderPubkey: activity.buyer
+        bidderPubkey: activity.buyer || ""
       }));
 
     console.log(`✅ Magic Eden: Fetched ${bids.length} bids for ${collectionSlug}`);
