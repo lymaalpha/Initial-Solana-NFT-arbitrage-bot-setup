@@ -1,6 +1,6 @@
 import dotenv from "dotenv";
 import BN from "bn.js";
-import { BotConfig, BotMode, LogLevel, AuctionHouse } from "./types";
+import { BotConfig, BotMode, LogLevel } from "./types";
 
 dotenv.config();
 
@@ -8,23 +8,6 @@ dotenv.config();
 function getEnvList(key: string, defaultValue: string[] = []): string[] {
   const val = process.env[key];
   return val ? val.split(",").map(v => v.trim()).filter(Boolean) : defaultValue;
-}
-
-/** Get marketplace list with type validation */
-function getMarketplaces(): AuctionHouse[] {
-  const marketplaces = getEnvList("MARKETPLACES", DEFAULT_MARKETPLACES);
-  
-  // Validate that all marketplaces are valid AuctionHouse values
-  const validMarketplaces = marketplaces.filter(m => 
-    m === "MagicEden" || m === "Rarible"
-  ) as AuctionHouse[];
-  
-  if (validMarketplaces.length !== marketplaces.length) {
-    const invalid = marketplaces.filter(m => !validMarketplaces.includes(m as AuctionHouse));
-    console.warn(`⚠️  Invalid marketplaces ignored: ${invalid.join(', ')}`);
-  }
-  
-  return validMarketplaces;
 }
 
 /** Safe number parsing with validation */
@@ -67,7 +50,6 @@ function getBotMode(): BotMode {
     return mode as BotMode;
   }
   
-  // Default based on SIMULATE_ONLY for backward compatibility
   return process.env.SIMULATE_ONLY === 'true' ? 'SIMULATION' : 'LIVE_TRADING';
 }
 
@@ -93,7 +75,7 @@ const DEFAULT_COLLECTIONS = [
 ];
 
 /** Default marketplaces if none specified */
-const DEFAULT_MARKETPLACES: AuctionHouse[] = [
+const DEFAULT_MARKETPLACES = [
   'MagicEden',
   'Rarible'
 ];
@@ -112,16 +94,13 @@ function validateConfig(): BotConfig {
     rpcUrl: validateRpcUrl(process.env.RPC_URL!),
     walletPrivateKey: validatePrivateKey(process.env.PRIVATE_KEY!),
     
-    // API Keys
+    // API Keys - SIMPLIFIED: Only what we actually use
     heliusApiKey: process.env.HELIUS_API_KEY || "",
-    openseaApiKey: process.env.OPENSEA_API_KEY || "",
-    moralisApiKey: process.env.MORALIS_API_KEY || "",
-    magicEdenApiKey: process.env.MAGIC_EDEN_API_KEY || "",
-    raribleApiKey: process.env.RARIBLE_API_KEY || "",
+    raribleApiKey: process.env.RARIBLE_API_KEY || "",  // ✅ Only Rarible API key
     
     // Trading parameters
     collections: getEnvList("COLLECTION_MINTS", DEFAULT_COLLECTIONS),
-    marketplaces: getMarketplaces(),
+    marketplaces: getEnvList("MARKETPLACES", DEFAULT_MARKETPLACES),
     minProfitLamports: parseBNFromSOL(process.env.MIN_PROFIT_SOL, 0.01, 'MIN_PROFIT_SOL'),
     feeBufferLamports: parseBNFromSOL(process.env.FEE_BUFFER_SOL, 0.002, 'FEE_BUFFER_SOL'),
     maxSlippageBps: parseNumber(process.env.MAX_SLIPPAGE_BPS, 100, 'MAX_SLIPPAGE_BPS'),
@@ -162,7 +141,7 @@ function validateConfig(): BotConfig {
     },
   };
 
-  // Enhanced validation checks
+  // Validation checks
   if (config.maxConcurrentTrades < 1) {
     throw new Error('MAX_CONCURRENT_TRADES must be at least 1');
   }
@@ -172,22 +151,7 @@ function validateConfig(): BotConfig {
   }
 
   if (config.marketplaces.length === 0) {
-    throw new Error('At least one valid marketplace must be specified (MagicEden or Rarible)');
-  }
-
-  // Enhanced API key validation
-  console.log("🔑 API Key Status:");
-  console.log(`   Magic Eden: ${config.magicEdenApiKey ? '✅ Configured' : '⚠️  Using public API (rate limited)'}`);
-  console.log(`   Rarible: ${config.raribleApiKey ? '✅ Configured' : '⚠️  Using public API (rate limited)'}`);
-  console.log(`   Helius: ${config.heliusApiKey ? '✅ Configured' : '❌ Missing (RPC may be slow)'}`);
-
-  // Validate marketplace settings based on enabled marketplaces
-  if (config.marketplaces.includes('MagicEden')) {
-    console.log('🔹 MagicEden: Enabled');
-  }
-  
-  if (config.marketplaces.includes('Rarible')) {
-    console.log('🔹 Rarible: Enabled');
+    throw new Error('At least one marketplace must be specified');
   }
 
   console.log("✅ Configuration loaded successfully");
@@ -195,6 +159,7 @@ function validateConfig(): BotConfig {
   console.log(`📊 Collections: ${config.collections.length}`);
   console.log(`🛒 Marketplaces: ${config.marketplaces.join(', ')}`);
   console.log(`💰 Min Profit: ${config.minProfitLamports.toNumber() / 1e9} SOL`);
+  console.log(`🔑 Rarible API: ${config.raribleApiKey ? '✅ Configured' : '⚠️  Using public API'}`);
 
   return config;
 }
@@ -202,7 +167,7 @@ function validateConfig(): BotConfig {
 // Export configuration singleton
 export const config = validateConfig();
 
-// Enhanced utility functions
+// Utility functions
 export const isTradingEnabled = (): boolean => {
   return config.mode === 'LIVE_TRADING';
 };
@@ -211,14 +176,4 @@ export const isSimulationMode = (): boolean => {
   return config.mode === 'SIMULATION';
 };
 
-// Marketplace-specific utilities
-export const isMagicEdenEnabled = (): boolean => {
-  return config.marketplaces.includes('MagicEden');
-};
-
-export const isRaribleEnabled = (): boolean => {
-  return config.marketplaces.includes('Rarible');
-};
-
-// Export configuration helpers
 export default config;
