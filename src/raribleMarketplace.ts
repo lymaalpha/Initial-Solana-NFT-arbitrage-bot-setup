@@ -1,4 +1,4 @@
-// src/main.ts (FINAL - WITH RATE-LIMITING FIX)
+// src/main.ts (FINAL - CORRECT IMPORTS & RATE LIMITING)
 import { Connection, Keypair } from "@solana/web3.js";
 import bs58 from "bs58";
 import { config } from "./config";
@@ -6,9 +6,9 @@ import { pnlLogger } from "./pnlLogger";
 import { scanForArbitrage } from "./scanForArbitrage";
 import { AutoFlashloanExecutor } from "./autoFlashloanExecutor";
 import { ArbitrageSignal, NFTBid, NFTListing } from "./types";
-import { sleep } from "./utils"; // Import the sleep function
+import { sleep } from "./utils";
 
-// Import working marketplace APIs
+// CORRECTLY IMPORTING NAMED EXPORTS
 import * as MagicEdenAPI from "./magicEdenMarketplace";
 import * as RaribleAPI from "./raribleMarketplace";
 
@@ -48,10 +48,12 @@ async function runBot() {
         safeFetch(() => RaribleAPI.fetchBids(collection.rarible), "Rarible"),
       ]);
 
-      // ✅ ADD A DELAY HERE to be respectful of the APIs between collection fetches.
-      await sleep(1000); // Wait 1 second before hitting the APIs for the next collection.
+      await sleep(1000); // 1-second delay between collections to avoid rate limits
 
-      const signals = await scanForArbitrage([...meListings, ...raribleListings], [...meBids, ...raribleBids]);
+      const listings: NFTListing[] = [...meListings, ...raribleListings];
+      const bids: NFTBid[] = [...meBids, ...raribleBids];
+      
+      const signals = await scanForArbitrage(listings, bids);
       if (signals.length > 0) allSignals.push(...signals);
     }
 
