@@ -1,4 +1,4 @@
-// src/main.ts (FINAL - CORRECT IMPORTS & RATE LIMITING)
+// src/main.ts (FINAL - CORRECT IMPORT SYNTAX)
 import { Connection, Keypair } from "@solana/web3.js";
 import bs58 from "bs58";
 import { config } from "./config";
@@ -8,15 +8,13 @@ import { AutoFlashloanExecutor } from "./autoFlashloanExecutor";
 import { ArbitrageSignal, NFTBid, NFTListing } from "./types";
 import { sleep } from "./utils";
 
-// CORRECTLY IMPORTING NAMED EXPORTS
-import * as MagicEdenAPI from "./magicEdenMarketplace";
-import * as RaribleAPI from "./raribleMarketplace";
+// CORRECTED IMPORT SYNTAX FOR FILES WITH A DEFAULT EXPORT
+import MagicEdenAPI from "./magicEdenMarketplace";
+import RaribleAPI from "./raribleMarketplace";
 
 const connection = new Connection(config.rpcUrl, "confirmed");
 const wallet = Keypair.fromSecretKey(bs58.decode(config.walletPrivateKey));
 const executor = new AutoFlashloanExecutor(connection, wallet);
-
-let cycleCount = 0;
 
 const COLLECTIONS_CONFIG = [
   { name: "Mad Lads", magicEden: "mad_lads", rarible: "SOLANA:DRiP2Pn2K6fuMLKQmt5rZWyHiUZ6WK3GChEySUpHSS4x" },
@@ -33,6 +31,7 @@ async function safeFetch<T>(fn: () => Promise<T[]>, source: string): Promise<T[]
 
 async function runBot() {
   pnlLogger.logMetrics({ message: "🚀 Arbitrage Bot Starting...", ...config });
+  let cycleCount = 0;
 
   while (true) {
     cycleCount++;
@@ -41,19 +40,21 @@ async function runBot() {
     for (const collection of COLLECTIONS_CONFIG) {
       pnlLogger.logMetrics({ message: `🔍 Scanning ${collection.name}...` });
 
-      const [meListings, raribleListings, meBids, raribleBids] = await Promise.all([
+      const results = await Promise.allSettled([
         safeFetch(() => MagicEdenAPI.fetchListings(collection.magicEden), "MagicEden"),
         safeFetch(() => RaribleAPI.fetchListings(collection.rarible), "Rarible"),
         safeFetch(() => MagicEdenAPI.fetchBids(collection.magicEden), "MagicEden"),
         safeFetch(() => RaribleAPI.fetchBids(collection.rarible), "Rarible"),
       ]);
 
-      await sleep(1000); // 1-second delay between collections to avoid rate limits
+      await sleep(1000);
 
-      const listings: NFTListing[] = [...meListings, ...raribleListings];
-      const bids: NFTBid[] = [...meBids, ...raribleBids];
-      
-      const signals = await scanForArbitrage(listings, bids);
+      const meListings: NFTListing[] = results[0].status === 'fulfilled' ? results[0].value as NFTListing[] : [];
+      const raribleListings: NFTListing[] = results[1].status === 'fulfilled' ? results[1].value as NFTListing[] : [];
+      const meBids: NFTBid[] = results[2].status === 'fulfilled' ? results[2].value as NFTBid[] : [];
+      const raribleBids: NFTBid[] = results[3].status === 'fulfilled' ? results[3].value as NFTBid[] : [];
+
+      const signals = await scanForArbitrage([...meListings, ...raribleListings], [...meBids, ...raribleBids]);
       if (signals.length > 0) allSignals.push(...signals);
     }
 
