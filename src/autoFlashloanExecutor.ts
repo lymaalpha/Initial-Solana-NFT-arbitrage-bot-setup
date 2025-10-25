@@ -1,4 +1,4 @@
-// src/autoFlashloanExecutor.ts (ABSOLUTE FINAL - CORRECTED)
+// src/autoFlashloanExecutor.ts (UPDATED)
 import { Connection, Keypair } from "@solana/web3.js";
 import BN from "bn.js";
 import { ArbitrageSignal, BotConfig, ExecuteSaleParams, SaleResponse } from "./types";
@@ -8,7 +8,6 @@ import { sleep } from "./utils";
 class FlashloanProgram {
   constructor(private connection: Connection, private wallet: Keypair) {}
 
-  // FIXED THE TYPO: ExecuteSaleGgParams -> ExecuteSaleParams
   async executeSale(params: ExecuteSaleParams): Promise<SaleResponse> {
     pnlLogger.logMetrics({ message: `Simulating trade for mint: ${params.listing.mint}` });
     await sleep(1000);
@@ -37,15 +36,14 @@ export class AutoFlashloanExecutor {
   }
 
   private async executeSingleTrade(signal: ArbitrageSignal, config: BotConfig): Promise<void> {
-    if (config.simulateOnly) {
+    // ✅ UPDATED: Use config.mode instead of config.simulateOnly
+    if (config.mode === 'SIMULATION') {
       pnlLogger.logMetrics({
         message: `[SIMULATION] Arbitrage opportunity found!`,
         strategy: signal.strategy,
         mint: signal.targetListing.mint,
         profit: signal.estimatedNetProfit.toNumber() / 1e9,
       });
-      // This is a simulation, so we don't log it as a "failed" or "executed" PnL event.
-      // We can create a new log type if needed, but for now, we just log the metric.
       return;
     }
 
