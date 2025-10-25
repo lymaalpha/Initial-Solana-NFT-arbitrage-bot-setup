@@ -23,13 +23,13 @@ class PnLLogger {
     console.error('[ERROR]', err.message, context || '');
   }
 
-  async logPnL(signal: ArbitrageSignal, txSig?: string, type: 'executed' | 'failed' = 'executed') {
-    const logData = {
+  async logPnL(signal: ArbitrageSignal, txSig?: string, type: "simulated" | "executed" | "failed" = "executed") {
+    const logData: TradeLog = {
       timestamp: new Date().toISOString(),
-      mint: signal.targetListing.mint || 'none',
-      profit: signal.estimatedNetProfit ? signal.estimatedNetProfit.toNumber() / 1e9 : 0,
+      mint: signal.targetListing.mint,
+      profit: signal.estimatedNetProfit.toNumber() / 1e9,
       txSig: txSig || 'none',
-      type: type as "simulated" | "executed" | "failed",
+      type: type,
     };
     
     console.log(`[PnL] ${type.toUpperCase()}:`, logData);
@@ -37,19 +37,6 @@ class PnLLogger {
     if (config.enableCsvLogging) {
       try {
         await csvWriter.writeRecords([logData]);
-      } catch (err) {
-        console.error('[ERROR] CSV write failed:', (err as Error).message);
-      }
-    }
-  }
-
-  // Simple method to log trades
-  async logTrade(tradeLog: TradeLog) {
-    console.log(`[TRADE]`, tradeLog);
-    
-    if (config.enableCsvLogging) {
-      try {
-        await csvWriter.writeRecords([tradeLog]);
       } catch (err) {
         console.error('[ERROR] CSV write failed:', (err as Error).message);
       }
