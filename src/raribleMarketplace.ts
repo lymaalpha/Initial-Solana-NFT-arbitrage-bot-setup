@@ -1,105 +1,74 @@
-// src/raribleMarketplace.ts (FINAL - CORRECT BASE URL )
-import axios from 'axios';
-import BN from 'bn.js';
-import { NFTListing, NFTBid, AuctionHouse } from './types';
-import { pnlLogger } from './pnlLogger';
+// src/main.ts (FINAL - WITH RATE-LIMITING FIX)
+import { Connection, Keypair } from "@solana/web3.js";
+import bs58 from "bs58";
+import { config } from "./config";
+import { pnlLogger } from "./pnlLogger";
+import { scanForArbitrage } from "./scanForArbitrage";
+import { AutoFlashloanExecutor } from "./autoFlashloanExecutor";
+import { ArbitrageSignal, NFTBid, NFTListing } from "./types";
+import { sleep } from "./utils"; // Import the sleep function
 
-// CORRECTED: The base URL is .com, not .org
-const RARIBLE_API_BASE = 'https://api.rarible.com';
-const headers = {
-  'Accept': 'application/json',
-  'X-API-KEY': process.env.RARIBLE_API_KEY || '',
-};
+// Import working marketplace APIs
+import * as MagicEdenAPI from "./magicEdenMarketplace";
+import * as RaribleAPI from "./raribleMarketplace";
 
-/**
- * Fetches active listings (sell orders ) for a collection.
- */
-export async function fetchListings(collectionId: string): Promise<NFTListing[]> {
-  const url = `${RARIBLE_API_BASE}/v0.1/orders/sell/by-collection`;
-  try {
-    const response = await axios.get(url, {
-      params: {
-        collection: collectionId,
-        platform: 'SOLANA',
-        status: 'ACTIVE',
-        size: 50,
-        sort: 'PRICE_ASC',
-      },
-      headers,
-      timeout: 15000,
-    });
+const connection = new Connection(config.rpcUrl, "confirmed");
+const wallet = Keypair.fromSecretKey(bs58.decode(config.walletPrivateKey));
+const executor = new AutoFlashloanExecutor(connection, wallet);
 
-    const listings: NFTListing[] = [];
-    if (response.data?.orders) {
-      for (const order of response.data.orders) {
-        if (order.take?.value && order.make?.type?.contract && order.maker) {
-          const price = new BN(order.take.value);
-          const mint = order.make.type.contract.split(':')[1];
-          listings.push({
-            mint: mint,
-            auctionHouse: 'Rarible',
-            price: price,
-            currency: 'SOL',
-            timestamp: Date.parse(order.lastUpdatedAt),
-            sellerPubkey: order.maker,
-          });
-        }
-      }
-    }
-    return listings;
-  } catch (err: any) {
-    pnlLogger.logError(err, {
-      message: `Rarible listings failed`,
-      url: url, // Add URL to log for debugging
-      collection: collectionId,
-      error: err.response?.status || err.message,
-    });
+let cycleCount = 0;
+
+const COLLECTIONS_CONFIG = [
+  { name: "Mad Lads", magicEden: "mad_lads", rarible: "SOLANA:DRiP2Pn2K6fuMLKQmt5rZWyHiUZ6WK3GChEySUpHSS4x" },
+  { name: "Okay Bears", magicEden: "okay_bears", rarible: "SOLANA:BUjZjAS2vbbb65g7Z1Ca9ZRVYoJscURG5L3AkVvHP9ac" },
+  { name: "DeGods", magicEden: "degods", rarible: "SOLANA:6XxjKYFbcndh2gDcsUrmZgVEsoDxXMnfsaGY6fpTJzNr" },
+];
+
+async function safeFetch<T>(fn: () => Promise<T[]>, source: string): Promise<T[]> {
+  try { return await fn(); } catch (err) {
+    pnlLogger.logError(err as Error, { message: `Fetch failed for ${source}` });
     return [];
   }
 }
 
-/**
- * Fetches active bids for a collection.
- */
-export async function fetchBids(collectionId: string): Promise<NFTBid[]> {
-  const url = `${RARIBLE_API_BASE}/v0.1/orders/bids/by-collection`;
-  try {
-    const response = await axios.get(url, {
-      params: {
-        collection: collectionId,
-        platform: 'SOLANA',
-        status: 'ACTIVE',
-        size: 50,
-        sort: 'PRICE_DESC',
-      },
-      headers,
-      timeout: 15000,
-    });
+async function runBot() {
+  pnlLogger.logMetrics({ message: "🚀 Arbitrage Bot Starting...", ...config });
 
-    const bids: NFTBid[] = [];
-    if (response.data?.orders) {
-      for (const order of response.data.orders) {
-        if (order.make?.value && order.maker) {
-          const price = new BN(order.make.value);
-          bids.push({
-            mint: collectionId,
-            auctionHouse: 'Rarible',
-            price: price,
-            currency: 'SOL',
-            timestamp: Date.parse(order.lastUpdatedAt),
-            bidderPubkey: order.maker,
-          });
-        }
-      }
+  while (true) {
+    cycleCount++;
+    const allSignals: ArbitrageSignal[] = [];
+
+    for (const collection of COLLECTIONS_CONFIG) {
+      pnlLogger.logMetrics({ message: `🔍 Scanning ${collection.name}...` });
+
+      const [meListings, raribleListings, meBids, raribleBids] = await Promise.all([
+        safeFetch(() => MagicEdenAPI.fetchListings(collection.magicEden), "MagicEden"),
+        safeFetch(() => RaribleAPI.fetchListings(collection.rarible), "Rarible"),
+        safeFetch(() => MagicEdenAPI.fetchBids(collection.magicEden), "MagicEden"),
+        safeFetch(() => RaribleAPI.fetchBids(collection.rarible), "Rarible"),
+      ]);
+
+      // ✅ ADD A DELAY HERE to be respectful of the APIs between collection fetches.
+      await sleep(1000); // Wait 1 second before hitting the APIs for the next collection.
+
+      const signals = await scanForArbitrage([...meListings, ...raribleListings], [...meBids, ...raribleBids]);
+      if (signals.length > 0) allSignals.push(...signals);
     }
-    return bids;
-  } catch (err: any) {
-    pnlLogger.logError(err, {
-      message: `Rarible bids failed`,
-      url: url, // Add URL to log for debugging
-      collection: collectionId,
-      error: err.response?.status || err.message,
-    });
-    return [];
+
+    if (allSignals.length > 0) {
+      const topSignals = allSignals.sort((a, b) => b.estimatedNetProfit.sub(a.estimatedNetProfit).toNumber());
+      pnlLogger.logMetrics({ message: `Executing top ${Math.min(topSignals.length, config.maxConcurrentTrades)} of ${allSignals.length} signals.` });
+      await executor.executeTrades(topSignals, config);
+    } else {
+      pnlLogger.logMetrics({ message: "No profitable signals found." });
+    }
+
+    pnlLogger.logMetrics({ message: `⏳ Cycle ${cycleCount} complete. Waiting ${config.scanIntervalMs / 1000}s...` });
+    await sleep(config.scanIntervalMs);
   }
 }
+
+runBot().catch(err => {
+  pnlLogger.logError(err as Error, { message: "FATAL: Bot has crashed" });
+  process.exit(1);
+});
