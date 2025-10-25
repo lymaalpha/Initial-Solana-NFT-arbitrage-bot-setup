@@ -1,10 +1,11 @@
-// src/raribleMarketplace.ts (FINAL - VERIFIED WITH OFFICIAL DOCS)
+// src/raribleMarketplace.ts (FINAL - CORRECT BASE URL )
 import axios from 'axios';
 import BN from 'bn.js';
 import { NFTListing, NFTBid, AuctionHouse } from './types';
 import { pnlLogger } from './pnlLogger';
 
-const RARIBLE_API_BASE = 'https://api.rarible.org'; // Corrected base URL from docs
+// CORRECTED: The base URL is .com, not .org
+const RARIBLE_API_BASE = 'https://api.rarible.com';
 const headers = {
   'Accept': 'application/json',
   'X-API-KEY': process.env.RARIBLE_API_KEY || '',
@@ -12,10 +13,8 @@ const headers = {
 
 /**
  * Fetches active listings (sell orders ) for a collection.
- * VERIFIED against api.rarible.org documentation.
  */
 export async function fetchListings(collectionId: string): Promise<NFTListing[]> {
-  // CORRECT ENDPOINT: /v0.1/orders/sell/by-collection
   const url = `${RARIBLE_API_BASE}/v0.1/orders/sell/by-collection`;
   try {
     const response = await axios.get(url, {
@@ -33,7 +32,6 @@ export async function fetchListings(collectionId: string): Promise<NFTListing[]>
     const listings: NFTListing[] = [];
     if (response.data?.orders) {
       for (const order of response.data.orders) {
-        // A sell order's "make" is the NFT, and the "take" is the price.
         if (order.take?.value && order.make?.type?.contract && order.maker) {
           const price = new BN(order.take.value);
           const mint = order.make.type.contract.split(':')[1];
@@ -52,6 +50,7 @@ export async function fetchListings(collectionId: string): Promise<NFTListing[]>
   } catch (err: any) {
     pnlLogger.logError(err, {
       message: `Rarible listings failed`,
+      url: url, // Add URL to log for debugging
       collection: collectionId,
       error: err.response?.status || err.message,
     });
@@ -61,10 +60,8 @@ export async function fetchListings(collectionId: string): Promise<NFTListing[]>
 
 /**
  * Fetches active bids for a collection.
- * VERIFIED against api.rarible.org documentation.
  */
 export async function fetchBids(collectionId: string): Promise<NFTBid[]> {
-  // CORRECT ENDPOINT: /v0.1/orders/bids/by-collection
   const url = `${RARIBLE_API_BASE}/v0.1/orders/bids/by-collection`;
   try {
     const response = await axios.get(url, {
@@ -82,11 +79,10 @@ export async function fetchBids(collectionId: string): Promise<NFTBid[]> {
     const bids: NFTBid[] = [];
     if (response.data?.orders) {
       for (const order of response.data.orders) {
-        // A bid order's "make" is the price, and the "take" is the NFT.
         if (order.make?.value && order.maker) {
           const price = new BN(order.make.value);
           bids.push({
-            mint: collectionId, // This is a collection-wide bid
+            mint: collectionId,
             auctionHouse: 'Rarible',
             price: price,
             currency: 'SOL',
@@ -100,6 +96,7 @@ export async function fetchBids(collectionId: string): Promise<NFTBid[]> {
   } catch (err: any) {
     pnlLogger.logError(err, {
       message: `Rarible bids failed`,
+      url: url, // Add URL to log for debugging
       collection: collectionId,
       error: err.response?.status || err.message,
     });
